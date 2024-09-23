@@ -7,7 +7,7 @@ from geopy.geocoders import Nominatim, ArcGIS
 from geopy.exc import GeocoderTimedOut, GeocoderQuotaExceeded
 from unidecode import unidecode
 from geopy.point import Point
-
+from tqdm import tqdm
 
 """
 Geocoding class, this class uses Nominatim (openstreetmaps) and ArcGIS to translate
@@ -19,6 +19,7 @@ ready for input into the next step of the pipeline.
 
 class Geocoder:
     def __init__(self) -> None:
+        tqdm.pandas()
         pass
 
     def geocode(self, input_csv: str) -> None:
@@ -26,29 +27,22 @@ class Geocoder:
         # Replace 'NULL' strings with NaN
         non_geocoded_df = non_geocoded_df.replace("NULL", pd.NA)
 
-        older_doc = False
-        # Drop specific columns if these fail then it means
-        # its an older format set older doc flag to true
-        try:
-            non_geocoded_df = non_geocoded_df.drop(
-                columns=["FirstName", "MiddleName", "LastName"]
-            )
-        except:
-            older_doc = True
-            pass
+        non_geocoded_df_cols = non_geocoded_df.columns
 
-        # try dropping again because older doc means it will be formatted differently
-        try:
-            non_geocoded_df = non_geocoded_df.drop(
-                columns=["First Name", "Middle Name", "Last Name"]
-            )
-        except:
-            pass
+        possible_death_add_names = [
+            "DeathAddress",
+            "Death Address",
+            "Event Address",
+            "EventAddress",
+        ]
 
-        ## renaming to match the format of the older doc
-        if older_doc:
+        ### Trying to normalise the data so we can access the address columns
+        if any(x in non_geocoded_df_cols for x in possible_death_add_names):
             non_geocoded_df = non_geocoded_df.rename(
                 columns={"Death Address": "DeathAddr", "Death Zip Code": "DeathZip"}
+            )
+            non_geocoded_df = non_geocoded_df.rename(
+                columns={"DeathAddress": "DeathAddr", "Death Zip Code": "DeathZip"}
             )
             non_geocoded_df = non_geocoded_df.rename(
                 columns={
@@ -89,30 +83,25 @@ class Geocoder:
             non_geocoded_df["address.death"]
         )
 
-        # Filter rows based on conditions
-        filtered_df = non_geocoded_df[
-            (non_geocoded_df.Fentanyl == 1)
-            | (non_geocoded_df["Prescription.opioids"] == 1)
-            | (non_geocoded_df.Heroin == 1)
-            | (non_geocoded_df.Methamphetamine == 1)
-            | (non_geocoded_df.Cocaine == 1)
-            | (non_geocoded_df.Benzodiazepines == 1)
-            & non_geocoded_df["event.address"].notna()
-        ]
-        filtered_df["event.address"] = filtered_df["event.address"].str.replace(
+        non_geocoded_df["event.address"] = non_geocoded_df["event.address"].str.replace(
             r"\.0$", "", regex=True
         )
 
-        non_geocoded_df = filtered_df
         non_geocoded_df = non_geocoded_df.rename(
             columns={"event.address": "eventaddress"}
         )
-        for index, row in non_geocoded_df.iterrows():
+
+        non_geocoded_df["geometry"] = pd.NA
+
+        print("Geocoding the data")
+        for index, row in tqdm(
+            non_geocoded_df.iterrows(), total=non_geocoded_df.shape[0]
+        ):
             lat, lon, address = self.geocode_address(
                 row["eventaddress"], provider="arcgis"
             )
             if address is not None:  # Update DataFrame if geocoding was successful
-                non_geocoded_df.at[index, "geometry"] = Point(lon, lat)
+                non_geocoded_df.at[index, "geometry"] = Point(lat, lon)
                 non_geocoded_df.at[index, "address"] = address
 
         for geom in non_geocoded_df["geometry"]:
@@ -132,8 +121,13 @@ class Geocoder:
                 locations_of_nulls["address"]
             )
 
-        non_geocoded_df["lon"] = non_geocoded_df["geometry"].apply(self._extract_lon)
-        non_geocoded_df["lat"] = non_geocoded_df["geometry"].apply(self._extract_lat)
+        print("Extracting the longitude and latitude:")
+        non_geocoded_df["lon"] = non_geocoded_df["geometry"].progress_apply(
+            self._extract_lon
+        )
+        non_geocoded_df["lat"] = non_geocoded_df["geometry"].progress_apply(
+            self._extract_lat
+        )
 
         non_geocoded_df.to_csv(f"{input_csv[:-4]}_geocoded.csv", index=False)
 
@@ -180,8 +174,8 @@ class Geocoder:
 
     @staticmethod
     def _extract_lon(geometry: Point) -> float:
-        return geometry.y
+        return geometry.longitude
 
     @staticmethod
     def _extract_lat(geometry: Point) -> float:
-        return geometry.x
+        return geometry.latitude

@@ -57,7 +57,7 @@ def bert_model_train(input_data, bert_type):
         bert_id = "emilyalsentzer/Bio_ClinicalBERT"
 
     tokenizer = AutoTokenizer.from_pretrained(bert_id)
-    drug_data = pd.read_pickle(f"../../data/{input_data}")
+    drug_data = pd.read_pickle(f"../../data/outcomes_squashed/{input_data}")
     tokenFunc = TokenizeFunc(tokenizer)
 
     drug_data_for_bert = drug_data[cols_needed]
@@ -93,9 +93,12 @@ def bert_model_train(input_data, bert_type):
         problem_type="multi_label_classification",
     ).to(device)
 
+    for param in model.parameters():
+        param.data = param.data.contiguous()
+
     training_args = TrainingArguments(
         output_dir="../Models/BERTfine_trainargs",
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         do_train=True,
         learning_rate=lr,

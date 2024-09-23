@@ -149,10 +149,6 @@ def multi_label_classifier(model_type):
         mlflow.log_metric("Hamming Test", hamming_l)
         mlflow.log_metric("F1 Test", f1)
         mlflow.log_metric("Accuracy Test", accuracy)
-        class_report = model.classification_report
-        for class_or_avg, metrics_dict in class_report.items():
-            for metric, value in metrics_dict.items():
-                mlflow.log_metric(class_or_avg + "_validation_" + metric, value)
 
         dumpObjects(
             model, f"../../models/models/classic_ml_models/multi_label/{model_type}.pkl"

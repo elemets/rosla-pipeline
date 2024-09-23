@@ -147,3 +147,7 @@ cui_vec.pkl
 glove_embeddings.pkl
 tfidf_ready.pkl
 outcomes_squashed.pkl
+
+models/
+pipeline/pipeline_steps/*/
+pipeline/pipeline_steps/*.csv
