@@ -6,7 +6,7 @@ import re
 from geopy.geocoders import Nominatim, ArcGIS
 from geopy.exc import GeocoderTimedOut, GeocoderQuotaExceeded
 from unidecode import unidecode
-from geopy.point import Point
+from shapely.geometry import Point
 from tqdm import tqdm
 
 """
@@ -101,7 +101,7 @@ class Geocoder:
                 row["eventaddress"], provider="arcgis"
             )
             if address is not None:  # Update DataFrame if geocoding was successful
-                non_geocoded_df.at[index, "geometry"] = Point(lat, lon)
+                non_geocoded_df.at[index, "geometry"] = Point(lon, lat)
                 non_geocoded_df.at[index, "address"] = address
 
         for geom in non_geocoded_df["geometry"]:
@@ -174,8 +174,8 @@ class Geocoder:
 
     @staticmethod
     def _extract_lon(geometry: Point) -> float:
-        return geometry.longitude
+        return geometry.x
 
     @staticmethod
     def _extract_lat(geometry: Point) -> float:
-        return geometry.latitude
+        return geometry.y

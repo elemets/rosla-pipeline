@@ -1,10 +1,9 @@
 import sys
 import pandas as pd
 import torch
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSequenceClassification,
-)
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 drug_cols = [
     "Methamphetamine",
@@ -21,71 +20,124 @@ drug_cols = [
 ]
 
 
-def predict(pred_df, model):
+class TextDataset(Dataset):
+    def __init__(self, texts, tokenizer, max_length=512):
+        self.texts = texts
+        self.tokenizer = tokenizer
+        self.max_length = max_length
 
-    device = "cuda"
+    def __len__(self):
+        return len(self.texts)
+
+    def __getitem__(self, idx):
+        text = self.texts[idx]
+        encoding = self.tokenizer(
+            text,
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+        )
+        # Convert lists to tensors
+        encoding = {key: torch.tensor(val) for key, val in encoding.items()}
+        return encoding
+
+
+def predict(pred_df, model_name, location_of_file, batch_size=16):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    n_gpus = torch.cuda.device_count()
+
     # Extract text from input
     texts = pred_df["text"].tolist()
+
     # Load the correct tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(f"../models/{model}/")
+    tokenizer = AutoTokenizer.from_pretrained(f"../models/{model_name}/")
 
-    inputs = tokenizer(
-        texts, return_tensors="pt", padding=True, truncation=True, max_length=512
-    ).to(device)
+    # Create Dataset and DataLoader for batch processing
+    dataset = TextDataset(texts, tokenizer)
+    dataloader = DataLoader(dataset, batch_size=batch_size)
 
+    # Load the model and wrap it for multi-GPU
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../models/{model}",
+        f"../models/{model_name}",
         num_labels=11,
         problem_type="multi_label_classification",
-    ).to(device)
+    )
 
-    # Make predictions
+    if n_gpus > 1:
+        model = torch.nn.DataParallel(model)
+
+    model.to(device)
+
+    all_predictions = []
+
+    # Batch-wise prediction with multiple GPUs
     with torch.no_grad():
-        outputs = model(**inputs)
+        print("Number of batches:")
+        for batch in tqdm(dataloader):
+            # Send tensors directly to device
+            inputs = {k: v.to(device) for k, v in batch.items()}
+            outputs = model(**inputs)
+            logits = outputs.logits
+            predicted_probabilities = torch.sigmoid(logits).cpu()
+            all_predictions.append(predicted_probabilities)
 
-    # Get predicted probabilities
-    logits = outputs.logits
-    predicted_probabilities = torch.sigmoid(logits).cpu()
+    # Concatenate all batch results
+    y_pred = torch.cat(all_predictions, dim=0)
+    y_pred = (y_pred > 0.5).int()
 
-    # Convert probabilities to binary (0 or 1) predictions
-    y_pred = (predicted_probabilities > 0.5).int()
+    # Convert to DataFrame
+    predicted_df = pd.DataFrame(y_pred.numpy(), columns=drug_cols)
 
-    predicted_df = pd.DataFrame(y_pred, columns=drug_cols)
+    # Ensure indices are aligned correctly
+    output_df = pd.concat(
+        [pred_df.reset_index(drop=True), predicted_df.reset_index(drop=True)], axis=1
+    )
 
-    output_df = pd.concat([pred_df, predicted_df], axis=1)
-
-    output_df.to_csv(f"./pipeline_steps/final_output.csv")
+    return output_df
 
 
 def create_text_col(input_df):
+    # Remove spaces from columns for checking
+    standardized_columns = input_df.columns.str.replace(" ", "")
+    input_df.columns = standardized_columns  # Update columns to be without spaces
 
     cause_alphabet = ["CauseA", "CauseB", "CauseC"]
-    cause_secondary = ["Primary Cause", "Secondary Cause"]
+    cause_secondary = ["PrimaryCause", "SecondaryCause"]
 
-    if any(x in cause_alphabet for x in input_df.columns):
+    if any(x in standardized_columns for x in cause_alphabet):
         input_df["text"] = (
             input_df["CauseA"].astype(str) + ", " + input_df["CauseB"].astype(str)
         )
 
-    if any(x in cause_secondary for x in input_df.columns):
+    elif any(x in standardized_columns for x in cause_secondary):
         input_df["text"] = (
-            input_df["Primary Cause"].astype(str)
+            input_df["PrimaryCause"].astype(str)
             + ", "
-            + input_df["Secondary Cause"].astype(str)
+            + input_df["SecondaryCause"].astype(str)
         )
+
+    else:
+        raise ValueError("Required cause columns are missing in the input DataFrame.")
 
     return input_df
 
 
 if __name__ == "__main__":
-
     location_of_file = sys.argv[1]
+    model_name = sys.argv[2]
 
-    model = sys.argv[2]
-
-    input_df = pd.read_csv(location_of_file)
+    if location_of_file.endswith(".csv"):
+        input_df = pd.read_csv(location_of_file)
+    elif location_of_file.endswith(".xlsx"):
+        input_df = pd.read_excel(location_of_file)
+    else:
+        raise ValueError("Please specify either a .csv or .xlsx file")
 
     input_df = create_text_col(input_df)
 
-    ## load best model
-    predict(input_df, model)
+    # Predict on the dataset with batch size to handle large input
+    pred_df = predict(input_df, model_name, location_of_file, batch_size=1024)
+    output_df = pred_df[pred_df["Any Drugs"] != 0].reset_index(drop=True)
+    # Saving the results to CSV
+    output_name = location_of_file.rsplit(".", 1)[0] + "_classified.csv"
+    output_df.to_csv(f"{output_name}")
