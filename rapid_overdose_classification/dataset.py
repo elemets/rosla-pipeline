@@ -15,6 +15,7 @@ other_cols_to_squash = [
     "Muscle Relaxants",
     "Barbiturates",
     "Hallucinogens",
+    "Amphetamine",
 ]
 
 benzo_cols_to_squash = ["Xanax", "Flualprazolam"]
@@ -41,6 +42,8 @@ drug_cols_no_opioids = [
     "Others",
 ]
 
+drug_cols_opioids = ["Opioids", "Fentanyl", "Prescription.opioids"]
+
 
 def prepping_outcome_cols(input_data):
     """
@@ -58,7 +61,8 @@ def prepping_outcome_cols(input_data):
     print("Dropping and squashing benzos")
     benzos_df = others_df.progress_apply(set_benzos, axis=1)
     benzos_df = benzos_df.drop(columns=benzo_cols_to_squash)
-    benzos_df.drop(columns=["Opioid"])
+    benzos_df = benzos_df.progress_apply(set_any_opioids, axis=1)
+    benzos_df = benzos_df.drop(columns=["Opioid"])
 
     print("Creating any drugs and no opioids cols")
     benzos_df["Any Drugs"] = np.zeros
@@ -129,6 +133,23 @@ def set_drug_no_opioids(row):
         row["Drug No Opioids"] = 1
     else:
         row["Drug No Opioids"] = 0
+    return row
+
+
+def set_any_opioids(row):
+    """
+    Set the 'Any opioids' column to 1 if any of the specified columns contain 1.
+
+    Args:
+        row (pd.Series): Row of data to process.
+
+    Returns:
+        pd.Series: Updated row with 'Drug No Opioids' column set to 1 if applicable.
+    """
+    if (row[drug_cols_opioids] == 1).any():
+        row["Any Opioids"] = 1
+    else:
+        row["Any Opioids"] = 0
     return row
 
 
