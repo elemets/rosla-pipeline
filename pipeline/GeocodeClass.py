@@ -22,7 +22,7 @@ class Geocoder:
         tqdm.pandas()
         pass
 
-    def geocode(self, input_csv: str) -> None:
+    def geocode(self, input_csv: str, output_csv: str) -> None:
         non_geocoded_df = pd.read_csv(input_csv)
         # Replace 'NULL' strings with NaN
         non_geocoded_df = non_geocoded_df.replace("NULL", pd.NA)
@@ -129,7 +129,7 @@ class Geocoder:
             self._extract_lat
         )
 
-        non_geocoded_df.to_csv(f"{input_csv[:-4]}_geocoded.csv", index=False)
+        non_geocoded_df.to_csv(output_csv, index=False)
 
     ## function which deals with geocoding and has an added sleep function meaning it
     ## shouldnt time out
@@ -174,8 +174,16 @@ class Geocoder:
 
     @staticmethod
     def _extract_lon(geometry: Point) -> float:
-        return geometry.x
+        try:
+            x_value = geometry.x
+        except:
+            x_value = None
+        return x_value
 
     @staticmethod
     def _extract_lat(geometry: Point) -> float:
-        return geometry.y
+        try:
+            y_value = geometry.y
+        except:
+            y_value = None
+        return y_value

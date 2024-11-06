@@ -2,9 +2,10 @@ import pandas as pd
 import pdfplumber
 import sys
 from tqdm import tqdm
+import argparse
 
 
-def pdf_to_csv(input_location):
+def pdf_to_csv(input_location, output_loc):
     pdf = pdfplumber.open(input_location)
     table_page_1 = pdf.pages[0].extract_table()
     cols = table_page_1[0]
@@ -15,10 +16,13 @@ def pdf_to_csv(input_location):
         curr_page_df = pd.DataFrame(curr_page[1:], columns=cols)
         total_df = pd.concat([total_df, curr_page_df], ignore_index=True)
 
-    output_loc = input_location[:-4] + ".csv"
     total_df.to_csv(output_loc, index=False)
 
 
 if __name__ == "__main__":
-    input_location = sys.argv[1]
-    pdf_to_csv(input_location)
+    parser = argparse.ArgumentParser(description="Convert PDF to CSV.")
+    parser.add_argument("-i", "--input", required=True, help="Input PDF file.")
+    parser.add_argument("-o", "--output", required=True, help="Output CSV file.")
+    args = parser.parse_args()
+
+    pdf_to_csv(args.input, args.output)

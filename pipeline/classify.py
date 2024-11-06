@@ -4,6 +4,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+import argparse
 
 drug_cols = [
     "Methamphetamine",
@@ -123,8 +124,16 @@ def create_text_col(input_df):
 
 
 if __name__ == "__main__":
-    location_of_file = sys.argv[1]
-    model_name = sys.argv[2]
+    parser = argparse.ArgumentParser(description="Classify text data.")
+    parser.add_argument("-i", "--input", required=True, help="Input CSV/XLSX file.")
+    parser.add_argument("-o", "--output", required=True, help="Output CSV file.")
+    parser.add_argument("-m", "--model", required=True, help="Model name or path.")
+
+    args = parser.parse_args()
+
+    location_of_file = args.input
+    output_name = args.output
+    model_name = args.model
 
     if location_of_file.endswith(".csv"):
         input_df = pd.read_csv(location_of_file)
@@ -139,5 +148,4 @@ if __name__ == "__main__":
     pred_df = predict(input_df, model_name, location_of_file, batch_size=1024)
     output_df = pred_df[pred_df["Any Drugs"] != 0].reset_index(drop=True)
     # Saving the results to CSV
-    output_name = location_of_file.rsplit(".", 1)[0] + "_classified.csv"
     output_df.to_csv(f"{output_name}")

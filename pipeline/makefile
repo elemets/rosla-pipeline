@@ -1,48 +1,34 @@
-PYTHON = python3
-PDF2CSV_SCRIPT = pdf2csv.py
-GEOCODE_SCRIPT = geocode.py
-CLASSIFY_SCRIPT = classify.py
-INPUT_FILE ?= input.pdf  # Default value if not provided
+# Define the default target
+SHELL := /bin/bash
 
-# Default target
-all: process
+.PHONY: all
+all: run_pipeline
 
-# Check if the input is a PDF
-process: check_pdf geocode classify
+# Virtual environment directory
+VENV_DIR := pipeline_venv
 
-# If the input is a PDF, convert it to CSV
-check_pdf:
-	EXT=$$(basename $(INPUT_FILE)); \
-	if [ "$${EXT##*.}" = "pdf" ]; then \
-		echo "Input is a PDF, converting to CSV..."; \
-		$(PYTHON) $(PDF2CSV_SCRIPT) $(INPUT_FILE); \
-		export INPUT_FILE=$$(echo $(INPUT_FILE) | sed 's/.pdf/.csv/'); \
-	else \
-		echo "Input is not a PDF, skipping PDF to CSV conversion..."; \
-	fi
+# Target to create virtual environment
+$(VENV_DIR)/bin/activate:
+	python3 -m venv $(VENV_DIR)
+	$(VENV_DIR)/bin/pip install --upgrade pip
 
-# Run the geocode script
-geocode:
-	EXT=$$(basename $(INPUT_FILE)); \
-	if [ "$${EXT##*.}" = "csv" ]; then \
-		echo "Running geocode on CSV..."; \
-		$(PYTHON) $(GEOCODE_SCRIPT) $(INPUT_FILE); \
-	else \
-		echo "Input is not a CSV, cannot geocode."; \
-		exit 1; \
-	fi
+# Target to install requirements
+.PHONY: requirements
+requirements: $(VENV_DIR)/bin/activate
+	$(VENV_DIR)/bin/pip install -r requirements.txt
 
-# Run the classify script
-classify:
-	EXT=$$(basename $(INPUT_FILE)); \
-	if [ "$${EXT##*.}" = "csv" ]; then \
-		echo "Running classification..."; \
-		$(PYTHON) $(CLASSIFY_SCRIPT) $(INPUT_FILE); \
-	else \
-		echo "Input is not a CSV, cannot classify."; \
-		exit 1; \
-	fi
 
-# Clean up (optional)
+# Target to run the pipeline script
+.PHONY: run_pipeline
+run_pipeline:
+	python pipeline.py
+
+# Optional: Clean up generated files
+.PHONY: clean
 clean:
-	rm -f *_geocoded.csv
+	rm -rf ./pipeline_steps/input_files/converted/*
+	rm -rf ./pipeline_steps/input_files/classified/*
+	rm -f ./pipeline_steps/input_files/combined_classified_data.csv
+	rm -f ./pipeline_steps/input_files/combined_classified_data_geocoded.csv
+	rm -f ./pipeline_steps/input_files/final.csv
+	rm -rf $(VENV_DIR)
