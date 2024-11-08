@@ -5,6 +5,21 @@ from shapely.geometry import Point
 import argparse
 import os
 
+columns_to_check = [
+    "Methamphetamine",
+    "Heroin",
+    "Cocaine",
+    "Fentanyl",
+    "Alcohol",
+    "Prescription.opioids",
+    "Any Opioids",
+    "Benzodiazepines",
+    "Others",
+    "Any Drugs",
+    "Drug No Opioids",
+    "EventAddress",
+]
+
 
 def join_census_tract(gdf_points, census_geojson):
     # Load the census tracts GeoJSON file
@@ -113,6 +128,24 @@ def parse_dates(row):
     return pd.NaT
 
 
+def resolve_duplicates(group):
+    if len(group) == 1:
+        return group
+
+    for col in columns_to_check[:-1]:  # Exclude 'EventAddress' for now
+        max_value = group[col].max()
+        group = group[group[col] == max_value]
+        if len(group) == 1:
+            return group
+
+    group["EventAddress_length"] = group["EventAddress"].astype(str).str.len()
+    max_length = group["EventAddress_length"].max()
+    group = group[group["EventAddress_length"] == max_length]
+    group = group.drop(columns="EventAddress_length")
+
+    return group.iloc[[0]]
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Group data by location.")
@@ -181,6 +214,12 @@ if __name__ == "__main__":
         )
         output_path = os.path.join(output_dir, "final.csv")
 
-    gdf_merged.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
+    processed_df = gdf_merged.groupby("CaseNumber", group_keys=False).apply(
+        resolve_duplicates
+    )
+
+    processed_df = processed_df.reset_index(drop=True)
+
+    processed_df.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
         output_path, index=False
     )
