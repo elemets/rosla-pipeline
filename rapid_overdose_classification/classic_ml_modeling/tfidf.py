@@ -4,7 +4,7 @@ import numpy as np
 import mlflow
 import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
-from model_tuner import Model
+from model_tuner import Model, dumpObjects
 import sklearnex
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
@@ -15,6 +15,7 @@ from sklearn.svm import SVC
 from sklearn.feature_extraction.text import TfidfVectorizer
 import sys
 from tqdm import tqdm
+from NaiveSVC import NaivelyCalibratedLinearSVC
 
 """
 Loops explained:
@@ -41,9 +42,13 @@ def tf_idf_single_label(drug):
 
     experiment_name = f"TFIDF Bootstrapped"
     mlflow.set_experiment(experiment_name)
-    drug_df = pd.read_pickle("../../Data/tfidf.pkl")
+    drug_df = pd.read_pickle("../../data/outcomes_squashed/outcomes_squashed_tfidf.pkl")
 
     with mlflow.start_run(run_name=f"{drug}") as parent_run:
+
+        best_average_precision = 0
+        best_model = 0
+
         for model_name in tqdm(model_list):
             with mlflow.start_run(run_name=f"{model_name}", nested=True) as child_run:
 
@@ -83,9 +88,7 @@ def tf_idf_single_label(drug):
                     }
                 elif model_name == "SVM":
 
-                    estimator = SVC(
-                        class_weight="balanced", probability=True, kernel="linear"
-                    )
+                    estimator = NaivelyCalibratedLinearSVC(class_weight="balanced")
                     estimator_name = "svm"
 
                     tuned_parameters = {
@@ -179,6 +182,16 @@ def tf_idf_single_label(drug):
                     "params"
                 ].items():
                     mlflow.log_param(param, value)
+
+                if classreport["weighted avg"]["f1-score"] > best_average_precision:
+                    best_average_precision = classreport["weighted avg"]["f1-score"]
+                    best_model = model
+                    best_model_type = model_name
+
+            dumpObjects(
+                best_model,
+                f"../../models/classic_ml_models/single_label/bioclinicalbert/{drug}_{best_model_type}.pkl",
+            )
 
 
 if __name__ == "__main__":

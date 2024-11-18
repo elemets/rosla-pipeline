@@ -79,9 +79,9 @@ def conv_to_list(value):
         list or int: List if the input is array-like, otherwise the input value.
     """
     if isinstance(value, int) and value == 0:
-        return value
+        return np.array(value)
     else:
-        return list(value)
+        return np.array(value)
 
 
 def get_summed_vector(cuis):
@@ -166,15 +166,13 @@ def clinbert_embed(text):
         np.ndarray: ClinBERT embeddings of the text.
     """
     with torch.no_grad():
-        inputs = tokenizer(
-            text, padding=True, return_tensors="pt", max_length=10, truncation=True
-        )
+        inputs = tokenizer(text, padding=True, return_tensors="pt", truncation=True)
         outputs = model(**inputs)
         # Sum the embeddings for each sample in the batch along the token dimension
-        feature_vectors = torch.sum(
-            outputs.last_hidden_state, dim=1
-        )  # dim=1 sums across tokens
-    return feature_vectors.numpy()
+        feature_vectors = outputs.last_hidden_state[:, 0, :].numpy()
+
+    features_array = np.array(feature_vectors)
+    return features_array
 
 
 if __name__ == "__main__":

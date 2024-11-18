@@ -4,14 +4,15 @@ import numpy as np
 import mlflow
 import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
-from model_tuner import Model
+from model_tuner import Model, dumpObjects
 import sklearnex
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 from sklearn.base import clone
-from sklearn.svm import SVC
+from NaiveSVC import NaivelyCalibratedLinearSVC
+
 import sys
 from tqdm import tqdm
 
@@ -28,11 +29,16 @@ def glove_single_label(drug):
 
     with mlflow.start_run(run_name=f"{drug}") as parent_run:
 
+        best_average_precision = 0
+        best_model = 0
+
         ### this patch helps to speed up sklearn in general
         ### but especially SVC which is veeeery slow due
         ### to using the probabiltiy=True (which is needed to generate roc_auc etc.)
         sklearnex.patch_sklearn()
-        drug_df = pd.read_pickle("../../data/outcomes_squashed/outcomes_squashed.pkl")
+        drug_df = pd.read_pickle(
+            "../../data/outcomes_squashed/outcomes_squashed_glove.pkl"
+        )
 
         for model_name in tqdm(model_list):
             with mlflow.start_run(run_name=f"{model_name}", nested=True) as child_run:
@@ -73,9 +79,7 @@ def glove_single_label(drug):
                     }
                 elif model_name == "SVM":
 
-                    estimator = SVC(
-                        class_weight="balanced", probability=True, kernel="linear"
-                    )
+                    estimator = NaivelyCalibratedLinearSVC(class_weight="balanced")
                     estimator_name = "svm"
 
                     tuned_parameters = {
@@ -168,6 +172,16 @@ def glove_single_label(drug):
                     "params"
                 ].items():
                     mlflow.log_param(param, value)
+
+                if classreport["weighted avg"]["f1-score"] > best_average_precision:
+                    best_average_precision = classreport["weighted avg"]["f1-score"]
+                    best_model = model
+                    best_model_type = model_name
+
+            dumpObjects(
+                best_model,
+                f"../../models/classic_ml_models/single_label/bioclinicalbert/{drug}_{best_model_type}.pkl",
+            )
 
 
 if __name__ == "__main__":
