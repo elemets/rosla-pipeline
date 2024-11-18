@@ -42,7 +42,7 @@ drug_cols_no_opioids = [
     "Others",
 ]
 
-drug_cols_opioids = ["Opioids", "Fentanyl", "Prescription.opioids"]
+drug_cols_opioids = ["Opioid", "Fentanyl", "Prescription.opioids"]
 
 
 def prepping_outcome_cols(input_data):
@@ -155,6 +155,9 @@ def set_any_opioids(row):
 
 if __name__ == "__main__":
     input_loc = sys.argv[1]
+    embedding = sys.argv[2]
     input_df = pd.read_pickle(f"../data/different_embeddings/{input_loc}")
     cols_squished_df = prepping_outcome_cols(input_df)
-    cols_squished_df.to_pickle("../data/outcomes_squashed/outcomes_squashed.pkl")
+    cols_squished_df.to_pickle(
+        f"../data/outcomes_squashed/outcomes_squashed_{embedding}.pkl"
+    )
