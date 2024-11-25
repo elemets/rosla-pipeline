@@ -159,6 +159,8 @@ def cui_single_label(drug):
                     ["f1_weighted", "roc_auc", "average_precision"],
                     num_resamples=1000,
                     n_samples=1000,
+                    threshold=model.threshold["roc_auc"],
+                    balance=True,
                 )
                 bootstrap_metrics_dict = bootstrap_metrics.to_dict(orient="records")
 
