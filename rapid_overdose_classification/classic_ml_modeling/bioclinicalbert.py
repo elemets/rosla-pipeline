@@ -157,6 +157,8 @@ def bioclinicalbert_single_label(drug):
                     ["f1_weighted", "roc_auc", "average_precision"],
                     num_resamples=1000,
                     n_samples=1000,
+                    threshold=model.threshold["roc_auc"],
+                    balance=True,
                 )
                 bootstrap_metrics_dict = bootstrap_metrics.to_dict(orient="records")
 
@@ -179,13 +181,17 @@ def bioclinicalbert_single_label(drug):
                 plt.title(f"Confusion Matrix for: {drug} on test set")
                 mlflow.log_figure(cm_display.figure_, f"confusion matrix {drug}.png")
 
-                if (
-                    bootstrap_metrics_dict["average_precision"]["Mean"]
-                    > best_average_precision
-                ):
-                    best_average_precision = bootstrap_metrics_dict[
-                        "average_precision"
-                    ]["Mean"]
+                average_precision_metric = next(
+                    (
+                        metric
+                        for metric in bootstrap_metrics_dict
+                        if metric["Metric"] == "average_precision"
+                    ),
+                    None,
+                )
+
+                if average_precision_metric["Mean"] > best_average_precision:
+                    best_average_precision = average_precision_metric["Mean"]
                     best_model = model
                     best_model_type = model_name
 
