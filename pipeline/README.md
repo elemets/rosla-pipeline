@@ -3,6 +3,31 @@
 This pipeline is for going from PDF / CSV files without geolocation or classification to
 a final .csv file that contains the classifications and geolocations.
 
+## Setting up environment
+
+Currently the pipeline is used by installing the requirements from the requirements.txt.
+You need to create an environment and install all the required packages using:
+
+```pip install -r requirements.txt```
+
+## Running pipeline
+
+While this environment is activated the user should place the "raw" files, this is 
+any .csv and .pdf file they want geocoded and classified into the directory `pipeline_steps/input_files/raw/`
+
+These will then be converted to the correct file classified and geocoded and spat out
+again.
+
+to run the pipeline the use the command
+
+```python pipeline.py```
+
+This will run all the steps and spit out a file in the `pipeline_steps` folder with the
+date ranging from the oldest death to the latest death as it name in year-month format. e.g.
+"2021-01-2024-02.csv" 
+
+# Old Pipeline Usage
+
 ## Conversion to CSV
 
 If the file is initially a .pdf then it needs to be converted into a .csv file.

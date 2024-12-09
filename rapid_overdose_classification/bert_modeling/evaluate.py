@@ -29,7 +29,7 @@ def evaluate_bert_models(input_data, model_type):
     6. Calculates evaluation metrics (accuracy, precision, recall, F1 score).
     7. Prints the evaluation results.
     """
-    # Load data to do the prediction on
+
     eval_df = pd.read_csv(input_data)
 
     texts = eval_df["text"].to_list()

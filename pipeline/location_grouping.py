@@ -128,24 +128,6 @@ def parse_dates(row):
     return pd.NaT
 
 
-def resolve_duplicates(group):
-    if len(group) == 1:
-        return group
-
-    for col in columns_to_check[:-1]:  # Exclude 'EventAddress' for now
-        max_value = group[col].max()
-        group = group[group[col] == max_value]
-        if len(group) == 1:
-            return group
-
-    group["EventAddress_length"] = group["EventAddress"].astype(str).str.len()
-    max_length = group["EventAddress_length"].max()
-    group = group[group["EventAddress_length"] == max_length]
-    group = group.drop(columns="EventAddress_length")
-
-    return group.iloc[[0]]
-
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Group data by location.")
@@ -181,7 +163,9 @@ if __name__ == "__main__":
     # Join with zip codes
     gdf_with_zip = join_zip_codes(gdf_with_census, zip_geojson)
 
-    gdf_merged = joining_similar_columns(gdf_with_zip)
+    # ### before joining similar columns we want to drop duplicates in the different
+
+    gdf_merged = gdf_with_zip
     gdf_merged["DeathDate"] = gdf_merged.apply(parse_dates, axis=1)
 
     unparsed_dates = gdf_merged[gdf_merged["DeathDate"].isna()]
@@ -214,12 +198,8 @@ if __name__ == "__main__":
         )
         output_path = os.path.join(output_dir, "final.csv")
 
-    processed_df = gdf_merged.groupby("CaseNumber", group_keys=False).apply(
-        resolve_duplicates
-    )
+    gdf_merged = gdf_merged.reset_index(drop=True)
 
-    processed_df = processed_df.reset_index(drop=True)
-
-    processed_df.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
+    gdf_merged.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
         output_path, index=False
     )

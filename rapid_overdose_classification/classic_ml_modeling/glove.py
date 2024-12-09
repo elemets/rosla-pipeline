@@ -99,6 +99,7 @@ def glove_single_label(drug):
                 model = Model(
                     name=f"{model_name}",
                     estimator_name=estimator_name,
+                    model_type="classification",
                     calibrate=calibrate,
                     estimator=clone(estimator),
                     kfold=kfold,
@@ -114,26 +115,29 @@ def glove_single_label(drug):
 
                 print(f"Tuning hyperparameters for: {drug}")
 
-                model.grid_search_param_tuning(X_train, y_train, f1_beta_tune=False)
+                model.grid_search_param_tuning(X_train, y_train, f1_beta_tune=True)
 
                 model.fit(X_train, y_train, score="roc_auc")
 
-                model.return_metrics(X_train, y_train)
+                model.return_metrics(X_train, y_train, optimal_threshold=True)
 
                 ### Logging the validation results to MLFflow
                 classreport = model.classification_report
 
                 mlflow.log_metric(
-                    "f1_score_valid", classreport["weighted avg"]["f1-score"]
+                    "f1_score_valid", classreport["macro avg"]["f1-score"]
                 )
                 mlflow.log_metric(
-                    "precision_valid", classreport["weighted avg"]["precision"]
+                    "precision_valid", classreport["macro avg"]["precision"]
                 )
-                mlflow.log_metric("recall_valid", classreport["weighted avg"]["recall"])
+                mlflow.log_metric("recall_valid", classreport["macro avg"]["recall"])
 
                 model.kfold = False
 
                 y_prob = model.predict_proba(X_test)[:, 1]
+
+                X_test = pd.DataFrame(X_test)
+                y_test = pd.Series(y_test)
 
                 ## Using the updated model tuner class to return bootstrapped metrics
                 ## For the f1 score. This is needed to recreate David's paper
@@ -159,7 +163,7 @@ def glove_single_label(drug):
                         metric["95% CI Upper"],
                     )
 
-                y_pred = model.predict(X_test, optimal_threshold=False)
+                y_pred = model.predict(X_test, optimal_threshold=True)
 
                 ### Saving the confusion matrix as a plot and then logging that plot
                 ### as an artifact in MLFlow
@@ -175,14 +179,14 @@ def glove_single_label(drug):
                 ].items():
                     mlflow.log_param(param, value)
 
-                if classreport["weighted avg"]["f1-score"] > best_average_precision:
-                    best_average_precision = classreport["weighted avg"]["f1-score"]
+                if classreport["macro avg"]["f1-score"] > best_average_precision:
+                    best_average_precision = classreport["macro avg"]["f1-score"]
                     best_model = model
                     best_model_type = model_name
 
             dumpObjects(
                 best_model,
-                f"../../models/classic_ml_models/single_label/bioclinicalbert/{drug}_{best_model_type}.pkl",
+                f"../../models/classic_ml_models/single_label/glove/{drug}_{best_model_type}.pkl",
             )
 
 

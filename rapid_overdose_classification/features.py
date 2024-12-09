@@ -178,13 +178,13 @@ def clinbert_embed(text):
 if __name__ == "__main__":
 
     input_data = sys.argv[1]
-    input_df = pd.read_csv(f"../data/before_preproc/{input_data}")
+    input_df = pd.read_csv(f"{input_data}")
     embedding_type = sys.argv[2]
 
     ### Loading spacy which will be used to convert
     ### into CUIs using the umls space
     if embedding_type == "cui":
-        if not os.path.exists("../data/different_embeddings/cui_vec.pkl"):
+        if not os.path.exists("../data/different_embeddings/cui_vec_test.pkl"):
             nlp = spacy.load("en_core_sci_sm")
             nlp.add_pipe(
                 "scispacy_linker",
@@ -209,7 +209,7 @@ if __name__ == "__main__":
             print("Finding CUIs in the text using scispacy and nltk")
             cuis_found = finding_cuis(input_df)
             input_df = converting_cuis_2_vec(cuis_found)
-            input_df.to_pickle("../data/different_embeddings/cui_vec.pkl")
+            input_df.to_pickle("../data/different_embeddings/cui_vec_test.pkl")
     elif embedding_type == "glove":
         nltk.download("punkt_tab")
         nltk.download("stopwords")

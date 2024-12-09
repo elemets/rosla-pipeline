@@ -113,6 +113,7 @@ def bioclinicalbert_single_label(drug):
                 model = Model(
                     name=f"{model_name}",
                     estimator_name=estimator_name,
+                    model_type="classification",
                     calibrate=calibrate,
                     estimator=clone(estimator),
                     kfold=kfold,
@@ -138,16 +139,19 @@ def bioclinicalbert_single_label(drug):
                 classreport = model.classification_report
 
                 mlflow.log_metric(
-                    "f1_score_valid", classreport["weighted avg"]["f1-score"]
+                    "f1_score_valid", classreport["macro avg"]["f1-score"]
                 )
                 mlflow.log_metric(
-                    "precision_valid", classreport["weighted avg"]["precision"]
+                    "precision_valid", classreport["macro avg"]["precision"]
                 )
-                mlflow.log_metric("recall_valid", classreport["weighted avg"]["recall"])
+                mlflow.log_metric("recall_valid", classreport["macro avg"]["recall"])
 
                 model.kfold = False
-
+                print(X_test)
                 y_prob = model.predict_proba(X_test)[:, 1]
+
+                X_test = pd.DataFrame(X_test)
+                y_test = pd.Series(y_test)
 
                 ## Using the updated model tuner class to return bootstrapped metrics
                 ## For the f1 score. This is needed to recreate David's paper
@@ -189,6 +193,8 @@ def bioclinicalbert_single_label(drug):
                     ),
                     None,
                 )
+                print("AVERAGE PRECISION METRICS")
+                print(average_precision_metric)
 
                 if average_precision_metric["Mean"] > best_average_precision:
                     best_average_precision = average_precision_metric["Mean"]
