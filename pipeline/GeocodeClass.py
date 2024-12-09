@@ -31,6 +31,7 @@ class Geocoder:
 
         possible_death_add_names = [
             "DeathAddress",
+            "DeathAdress",
             "Death Address",
             "Event Address",
             "EventAddress",
@@ -45,8 +46,18 @@ class Geocoder:
                 columns={"DeathAddress": "DeathAddr", "Death Zip Code": "DeathZip"}
             )
             non_geocoded_df = non_geocoded_df.rename(
+                columns={"DeathAdress": "DeathAddr"}
+            )
+            non_geocoded_df = non_geocoded_df.rename(
                 columns={
                     "Event Address": "EventAddr",
+                    "Event Zip": "EventZip",
+                    "EventCity": "EventCityDesc",
+                }
+            )
+            non_geocoded_df = non_geocoded_df.rename(
+                columns={
+                    "EventAddress": "EventAddr",
                     "Event Zip": "EventZip",
                     "EventCity": "EventCityDesc",
                 }

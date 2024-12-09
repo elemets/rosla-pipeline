@@ -84,6 +84,8 @@ def set_others(row):
     """
     if (row[other_cols_to_squash] == 1).any():
         row["Others"] = 1
+    else:
+        row["Others"] = 0
     return row
 
 

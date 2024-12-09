@@ -60,12 +60,25 @@ def bert_model_train(input_data, bert_type):
     drug_data = pd.read_pickle(f"../../data/outcomes_squashed/{input_data}")
     tokenFunc = TokenizeFunc(tokenizer)
 
-    drug_data_for_bert = drug_data[cols_needed]
+    ### adding columns needed for comparing against single label later
+    cols_for_split = cols_needed.copy()
+    cols_for_split.extend(["clinBERTEmbed"])
+    print(cols_for_split)
+
+    drug_data_for_bert = drug_data[cols_for_split]
 
     train_val, test = train_test_split(
         drug_data_for_bert, random_state=42, test_size=0.2
     )
     train, val = train_test_split(train_val, random_state=42, test_size=0.2)
+
+    test.to_pickle("../../data/test_set.pkl")
+    print("Saved test set to the data directory")
+
+    ### making sure dataset has only text columns and the outcome
+    train = train[cols_needed]
+    val = val[cols_needed]
+    test = test[cols_needed]
 
     train_drug_set = Dataset.from_pandas(train)
     test_drug_set = Dataset.from_pandas(test)
