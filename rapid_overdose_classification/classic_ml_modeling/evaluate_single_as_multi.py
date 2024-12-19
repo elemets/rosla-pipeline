@@ -8,9 +8,10 @@ from sklearn.metrics import (
     classification_report,
     hamming_loss,
     roc_auc_score,
+    f1_score,
 )
 from sklearn.preprocessing import MultiLabelBinarizer
-
+import mlflow
 
 drug_cols = [
     "Methamphetamine",
@@ -97,6 +98,8 @@ def predict_all_models(X_column, models_dict):
 if __name__ == "__main__":
     import sys
 
+    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+
     embedder = sys.argv[1]
     text_input = sys.argv[2]
 
@@ -109,9 +112,13 @@ if __name__ == "__main__":
         X = np.stack(X, axis=0)
         n_samples, sequence_length, n_features = X.shape
         X = X.reshape(-1, n_features)
-
     elif embedder == "cuis":
-        X = text_df["vector"]
+        X = text_df["vector"].values
+        default_array = np.zeros(len(X[2]))
+        cleaned_X = [
+            np.array(entry) if isinstance(entry, list) else default_array for entry in X
+        ]
+        X = np.stack(cleaned_X, axis=0)
     elif embedder == "glove":
         X = text_df["GloVE_proc"]
 
@@ -133,18 +140,28 @@ if __name__ == "__main__":
     print("True Values Data Type:", true_values.dtype)
 
     roc_auc = roc_auc_score(true_values, probability_values, average="macro")
+    f1 = f1_score(true_values, predicted_values, average="macro")
 
     # Evaluate metrics
     accuracy = accuracy_score(true_values, predicted_values)
-    print(f"Accuracy: {accuracy:.2f}")
+    print(f"Accuracy: {accuracy:.3f}")
 
     hamming = hamming_loss(true_values, predicted_values)
-    print(f"Hamming Loss: {hamming:.2f}")
+    print(f"Hamming Loss: {hamming:.3f}")
 
-    print(f"ROC AUC: {roc_auc:.2f}")
+    print(f"Macro ROC AUC: {roc_auc:.3f}")
+    print(f"Macro F1 Score: {f1:.3f}")
 
     report = classification_report(
         true_values, predicted_values, target_names=y_df.columns
     )
     print("Classification Report:")
     print(report)
+
+    experiment_name = f"Table 3 Results"
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(run_name=f"Single Label as Multi {embedder}") as parent_run:
+        mlflow.log_metric("Hamming Loss", hamming)
+        mlflow.log_metric("macro f1", f1)
+        mlflow.log_metric("macro roc_auc", roc_auc)
+        mlflow.log_metric("accuracy", accuracy)

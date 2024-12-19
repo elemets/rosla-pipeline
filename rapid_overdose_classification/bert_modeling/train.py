@@ -62,7 +62,7 @@ def bert_model_train(input_data, bert_type):
 
     ### adding columns needed for comparing against single label later
     cols_for_split = cols_needed.copy()
-    cols_for_split.extend(["clinBERTEmbed"])
+    cols_for_split.extend(["clinBERTEmbed", "vector", "GloVE_proc"])
     print(cols_for_split)
 
     drug_data_for_bert = drug_data[cols_for_split]

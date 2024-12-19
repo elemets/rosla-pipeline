@@ -158,11 +158,11 @@ def bioclinicalbert_single_label(drug):
                 bootstrap_metrics = model.return_bootstrap_metrics(
                     X_test,
                     y_test,
-                    ["f1_weighted", "roc_auc", "average_precision"],
+                    ["f1_macro", "roc_auc", "average_precision"],
                     num_resamples=1000,
                     n_samples=1000,
                     threshold=model.threshold["roc_auc"],
-                    balance=True,
+                    balance=False,
                 )
                 bootstrap_metrics_dict = bootstrap_metrics.to_dict(orient="records")
 
