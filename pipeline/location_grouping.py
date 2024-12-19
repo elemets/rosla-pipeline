@@ -4,6 +4,7 @@ import geopandas as gpd
 from shapely.geometry import Point
 import argparse
 import os
+import numpy as np
 
 columns_to_check = [
     "Methamphetamine",
@@ -92,12 +93,12 @@ def joining_similar_columns(dataframe):
         "CauseB": ["CauseB", "Cause B"],
         "CauseC": ["CauseC", "Cause C"],
         "CauseD": ["CauseD", "Cause D"],
-        "CauseOther": ["CauseOther", "Other Cause"],
+        "CauseOther": ["OtherCause", "Other Cause"],
         "HowInjuryOccurred": ["HowInjuryOccurred", "InjuryDesc"],
         "FirstName": ["First Name"],
         "MiddleName": ["Middle Name"],
         "LastName": ["Last Name"],
-        "DateOfBirth": ["Date of Birth"],
+        "DateOfBirth": ["Date of Birth", "BirthDate", "DateofBirth"],
         "Text": ["text"],
         "Address": ["address"],  # Need to verify what this refers to
         # Add any other columns as needed
@@ -126,6 +127,52 @@ def parse_dates(row):
             continue
     # If all formats fail, return NaT
     return pd.NaT
+
+
+def clean_and_categorize_race(race):
+    if pd.isna(race):
+        return np.nan
+    race = race.lower()  # Case folding
+    race = race.replace(" ", "")  # Remove spaces
+    race = race.replace("\n", "")  # Remove newline characters
+    if '","' in race or "," in race:  # Adjust based on your actual separator
+        return "UNKNOWN"
+
+    if race in ["americanindian", "nativeamerican"]:
+        return "AMERICAN INDIAN"
+    elif race in ["armenian", "middleeastern"]:
+        return "MIDDLE EASTERN"
+    elif race in [
+        "asian",
+        "cambodian",
+        "chinese",
+        "filipino",
+        "japanese",
+        "korean",
+        "eastindian",
+        "thai",
+        "vietnamese",
+    ]:
+        return "ASIAN"
+    elif race in ["black"]:
+        return "BLACK"
+    elif race in [
+        "guamanian",
+        "hawaiian",
+        "pacificislander",
+        "samoan",
+        "tongan",
+        "nativehawaiian/otherpacificislander",
+    ]:
+        return "PACIFIC ISLANDER"
+    elif race in ["hispanic/latino", "hispanic/latina", "hispanic/latinamerican"]:
+        return "LATINE"
+    elif race in ["white", "caucasian", "white/caucasian"]:
+        return "WHITE"
+    elif race in ["unknown", "null", "unknown/other"]:
+        return np.nan
+    else:
+        return race
 
 
 if __name__ == "__main__":
@@ -199,6 +246,41 @@ if __name__ == "__main__":
         output_path = os.path.join(output_dir, "final.csv")
 
     gdf_merged = gdf_merged.reset_index(drop=True)
+
+    #### Merge racial categories
+
+    gdf_merged["Race"] = gdf_merged["Race"].apply(clean_and_categorize_race)
+
+    #### Dropping irrelevant columns
+
+    gdf_merged.drop(
+        columns=[
+            "DeathAddr",
+            "EventAddr",
+            "address.death",
+            "eventaddress",
+            "address",
+            "EventCityDesc.1",
+            "Unnamed: 0",
+            "Zip",
+            "Zip.1",
+            "FirstName",
+            "MiddleName",
+            "LastName",
+            "CauseC",
+            "CauseD",
+            "Unnamed: 0.1",
+            "index__census",
+            "OBJECTID_left",
+            "OBJECTID_right",
+        ],
+        inplace=True,
+    )
+
+    ### Age clean up
+    gdf_merged["Age"] = gdf_merged["Age"].str.extract("(\d+)").astype(float)
+
+    gdf_merged = gdf_merged.drop_duplicates(subset="CaseNumber", keep="last")
 
     gdf_merged.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
         output_path, index=False

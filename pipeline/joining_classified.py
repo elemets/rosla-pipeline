@@ -90,7 +90,6 @@ def combine_classified_csv_files(folder_path, output_file=None):
             by=["Any Drugs", "DeathDate"], ascending=[False, False]
         )
 
-        # Drop duplicates based on "CaseNumber," keeping the first occurrence (which now has priority based on the sort)
         ucla_combined = ucla_combined.drop_duplicates(subset="CaseNum", keep="first")
 
         # Display the shape of the DataFrame after dropping duplicates

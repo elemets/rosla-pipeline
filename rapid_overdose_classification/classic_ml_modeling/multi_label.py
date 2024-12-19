@@ -2,9 +2,14 @@ import pandas as pd
 import numpy as np
 import mlflow
 import matplotlib.pyplot as plt
-from sklearn.metrics import f1_score, accuracy_score, ConfusionMatrixDisplay
+from sklearn.metrics import (
+    f1_score,
+    accuracy_score,
+    ConfusionMatrixDisplay,
+    roc_auc_score,
+)
 import sys
-from model_tuner import Model
+from model_tuner import Model, train_val_test_split
 from model_tuner.pickleObjects import dumpObjects
 from constants import all_drug_cols
 from sklearn.metrics import hamming_loss, make_scorer
@@ -61,7 +66,7 @@ def multi_label_classifier(model_type):
     else:
         raise ("Need to specify a model type out of RandomForest and XGBoost")
 
-    drug_df = pd.read_pickle("../../data/outcomes_squashed/outcomes_squashed.pkl")
+    drug_df = pd.read_pickle("../../data/outcomes_squashed/combined_data.pkl")
     hamming = make_scorer(hamming_loss, greater_is_better=False)
 
     y = drug_df[all_drug_cols].values
@@ -73,6 +78,7 @@ def multi_label_classifier(model_type):
 
         model = Model(
             name=model_type,
+            model_type="classification",
             estimator_name=estimator_name,
             multi_label=True,
             class_labels=all_drug_cols,
@@ -93,7 +99,7 @@ def multi_label_classifier(model_type):
 
         model.grid_search_param_tuning(X, y)
 
-        X_train, X_valid, X_test, y_train, y_valid, y_test = model.train_val_test_split(
+        X_train, X_valid, X_test, y_train, y_valid, y_test = train_val_test_split(
             X,
             y,
             stratify_y=False,
@@ -101,8 +107,6 @@ def multi_label_classifier(model_type):
             train_size=model.train_size,
             validation_size=model.validation_size,
             test_size=model.test_size,
-            calibrate=False,
-            stratify_cols=model.stratify_cols,
         )
 
         model.kfold = False
@@ -111,7 +115,8 @@ def multi_label_classifier(model_type):
 
         ### F1 Weighted
         y_pred = model.predict(X_test, optimal_threshold=False)
-        f1 = f1_score(y_test, y_pred, average="weighted")
+        y_prob = model.predict_proba(X_test)[:, 1]
+        f1 = f1_score(y_test, y_pred, average="macro")
         ### Accuracy
         accuracy = accuracy_score(y_test, y_pred)
 
@@ -120,6 +125,7 @@ def multi_label_classifier(model_type):
         conf_valid = multilabel_confusion_matrix(y_valid, y_pred_valid)
 
         hamming_l = hamming_loss(y_test, y_pred)
+        roc_auc = roc_auc_score(y_test, y_prob, average="macro")
         for index, cm in enumerate(conf_valid):
             print(cm)
             cm_valid = ConfusionMatrixDisplay(cm)
@@ -147,8 +153,9 @@ def multi_label_classifier(model_type):
             mlflow.log_param(param, value)
 
         mlflow.log_metric("Hamming Test", hamming_l)
-        mlflow.log_metric("F1 Test", f1)
+        mlflow.log_metric("Macro F1 Test", f1)
         mlflow.log_metric("Accuracy Test", accuracy)
+        mlflow.log_metric("ROC AUC", roc_auc)
 
         dumpObjects(
             model, f"../../models/models/classic_ml_models/multi_label/{model_type}.pkl"

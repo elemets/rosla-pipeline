@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
+import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -187,7 +188,13 @@ def join_similar_columns():
     column_groups = {
         "CaseNumber": ["CaseNum", "CaseNumber", "Case Number"],
         "ResidenceType": ["ResType", "ResidenceType", "Residence Type"],
-        "DeathDate": ["DeathDate", "Date of Death", "Death Date"],
+        "DeathDate": [
+            "DeathDate",
+            "Date of Death",
+            "Death Date",
+            "DateOfDeath",
+            "DateofDeath",
+        ],
         "DeathTime": ["DeathTime", "Time of Death", "Death Time"],
         "DeathAddress": [
             "DeathAddr",
@@ -196,6 +203,7 @@ def join_similar_columns():
             "address.death",
             "DeathAdress.1",
         ],
+        "DeathTime": ["TimeofDeath"],
         "DeathZip": ["DeathZip", "DeathZip.1"],
         "EventPlace": ["EventPlace", "Event Place"],
         "EventAddress": ["EventAddr", "EventAddr.1", "eventaddress", "Event Address"],
@@ -210,7 +218,7 @@ def join_similar_columns():
         "FirstName": ["First Name"],
         "MiddleName": ["Middle Name"],
         "LastName": ["Last Name"],
-        "DateOfBirth": ["Date of Birth"],
+        "DateofBirth": ["Date of Birth", "BirthDate"],
         "Text": ["text"],
         "Address": ["address"],  # Need to verify what this refers to
         # Add any other columns as needed
@@ -227,7 +235,6 @@ def join_similar_columns():
         dataframe.drop(
             columns=[col for col in existing_cols if col != new_col], inplace=True
         )
-
     print("AFTER:")
     print(dataframe.shape)
     dataframe.to_csv(joined_data_loc)
