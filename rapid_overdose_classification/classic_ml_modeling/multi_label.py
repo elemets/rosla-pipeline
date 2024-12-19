@@ -37,6 +37,7 @@ def multi_label_classifier(model_type):
 
     if model_type == "XGBoost":
         estimator = XGBClassifier()
+        early_boost = False
 
         estimator_name = "xgb"
         ### need to do this because we have to nest it in  a mutlioutputclassifier
@@ -46,13 +47,12 @@ def multi_label_classifier(model_type):
             f"{estimator_name}__estimator__n_estimators": [50, 10, 100],
             f"{estimator_name}__estimator__n_jobs": [-2],
             f"{estimator_name}__estimator__device": ["cuda"],
-            f"{estimator_name}__estimator__early_stopping_rounds": [10],
-            f"{estimator_name}__estimator__eval_metric": ["logloss"],
         }
+
         estimator = MultiOutputClassifier(estimator)
     elif model_type == "RandomForest":
         rf = RandomForestClassifier(class_weight="balanced")
-
+        early_boost = False
         estimator_name = "rf"
 
         tuned_parameters = {
@@ -88,7 +88,8 @@ def multi_label_classifier(model_type):
             kfold=False,
             stratify_y=False,
             grid=tuned_parameters,
-            randomized_grid=False,
+            randomized_grid=True,
+            boost_early=early_boost,
             n_iter=3,
             scoring=["hamming_loss"],
             n_jobs=-2,
@@ -96,7 +97,6 @@ def multi_label_classifier(model_type):
         )
 
         print(f"Tuning hyperparameters for all drugs:")
-
         model.grid_search_param_tuning(X, y)
 
         X_train, X_valid, X_test, y_train, y_valid, y_test = train_val_test_split(
@@ -112,10 +112,11 @@ def multi_label_classifier(model_type):
         model.kfold = False
 
         y_prob = model.predict_proba(X_test)
-
+        # Reshaping and extarcting just the predicted positive class
+        # for y_prob
+        y_prob = np.array([label_probs[:, 1] for label_probs in y_prob]).T
         ### F1 Weighted
         y_pred = model.predict(X_test, optimal_threshold=False)
-        y_prob = model.predict_proba(X_test)[:, 1]
         f1 = f1_score(y_test, y_pred, average="macro")
         ### Accuracy
         accuracy = accuracy_score(y_test, y_pred)
@@ -158,7 +159,7 @@ def multi_label_classifier(model_type):
         mlflow.log_metric("ROC AUC", roc_auc)
 
         dumpObjects(
-            model, f"../../models/models/classic_ml_models/multi_label/{model_type}.pkl"
+            model, f"../../models//classic_ml_models/multi_label/{model_type}.pkl"
         )
 
 
