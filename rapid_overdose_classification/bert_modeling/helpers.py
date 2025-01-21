@@ -26,8 +26,8 @@ def multi_label_metrics(predictions, labels, threshold=0.5):
     y_pred[np.where(probs >= threshold)] = 1
     # compute metrics
     y_true = labels
-    f1_micro_average = f1_score(y_true=y_true, y_pred=y_pred, average="micro")
-    roc_auc = roc_auc_score(y_true, y_pred, average="micro")
+    f1_macro_average = f1_score(y_true=y_true, y_pred=y_pred, average="macro")
+    roc_auc = roc_auc_score(y_true, y_pred, average="macro")
     accuracy = accuracy_score(y_true, y_pred)
     # return as dictionary
     class_report = classification_report(
@@ -36,7 +36,7 @@ def multi_label_metrics(predictions, labels, threshold=0.5):
         output_dict=False,
         target_names=drug_cols,
     )
-    metrics = {"f1": f1_micro_average, "roc_auc": roc_auc, "accuracy": accuracy}
+    metrics = {"f1": f1_macro_average, "roc_auc": roc_auc, "accuracy": accuracy}
     return metrics
 
 
