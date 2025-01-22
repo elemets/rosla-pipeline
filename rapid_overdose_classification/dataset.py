@@ -33,16 +33,8 @@ drug_cols = [
     "Others",
 ]
 
-drug_cols_no_opioids = [
-    "Methamphetamine",
-    "Cocaine",
-    "Alcohol",
-    "Prescription.opioids",
-    "Benzodiazepines",
-    "Others",
-]
 
-drug_cols_opioids = ["Opioid", "Fentanyl", "Prescription.opioids"]
+drug_cols_opioids = ["Heroin", "Opioid", "Fentanyl", "Prescription.opioids"]
 
 
 def prepping_outcome_cols(input_data):
@@ -53,7 +45,7 @@ def prepping_outcome_cols(input_data):
         input_data (pd.DataFrame): DataFrame containing the input data.
 
     Returns:
-        pd.DataFrame: DataFrame with new custom columns 'Any Drugs' and 'Drug No Opioids'.
+        pd.DataFrame: DataFrame with new custom columns 'Any Drugs'.
     """
     print("Dropping and squashing others")
     others_df = input_data.progress_apply(set_others, axis=1)
@@ -68,8 +60,7 @@ def prepping_outcome_cols(input_data):
     benzos_df["Any Drugs"] = np.zeros
     benzos_df["Drug No Opioids"] = np.zeros
     any_drugs_df = benzos_df.progress_apply(set_any_drugs, axis=1)
-    drugs_no_opioids_df = any_drugs_df.progress_apply(set_drug_no_opioids, axis=1)
-    return drugs_no_opioids_df
+    return any_drugs_df
 
 
 def set_others(row):
@@ -121,22 +112,6 @@ def set_any_drugs(row):
     return row
 
 
-def set_drug_no_opioids(row):
-    """
-    Set the 'Drug No Opioids' column to 1 if any of the specified columns contain 1.
-
-    Args:
-        row (pd.Series): Row of data to process.
-
-    Returns:
-        pd.Series: Updated row with 'Drug No Opioids' column set to 1 if applicable.
-    """
-    if (row[drug_cols_no_opioids] == 1).any():
-        row["Drug No Opioids"] = 1
-    else:
-        row["Drug No Opioids"] = 0
-    return row
-
 
 def set_any_opioids(row):
     """
@@ -154,12 +129,31 @@ def set_any_opioids(row):
         row["Any Opioids"] = 0
     return row
 
+def combine_embedding_files():
+    cui = pd.read_pickle(f"../data/outcomes_squashed/outcomes_squashed_cui.pkl")
+    bioclin = pd.read_pickle(f"../data/outcomes_squashed/outcomes_squashed_bioclinicalbert.pkl")
+    glove = pd.read_pickle(f"../data/outcomes_squashed/outcomes_squashed_glove.pkl")
+    combined_df = pd.DataFrame()
+    combined_df['text'] = cui['text']
+    combined_df['vector'] = cui['vector']
+    combined_df['clinBERTEmbed'] = bioclin['clinBERTEmbed']
+    combined_df['GloVE_proc'] = glove['GloVE_proc']
+    combined_df[drug_cols] = bioclin[drug_cols]
+    print(combined_df.columns.tolist())
+    print("Saving combined pkl file")
+    return combined_df
+
 
 if __name__ == "__main__":
     input_loc = sys.argv[1]
-    embedding = sys.argv[2]
-    input_df = pd.read_pickle(f"../data/different_embeddings/{input_loc}")
-    cols_squished_df = prepping_outcome_cols(input_df)
-    cols_squished_df.to_pickle(
-        f"../data/outcomes_squashed/outcomes_squashed_{embedding}.pkl"
-    )
+    
+    if input_loc == "combine":
+        comb_df = combine_embedding_files()
+        comb_df.to_pickle("../data/outcomes_squashed/combined_data.pkl")
+    else:
+        embedding = sys.argv[2]
+        input_df = pd.read_pickle(f"../data/different_embeddings/{input_loc}")
+        cols_squished_df = prepping_outcome_cols(input_df)
+        cols_squished_df.to_pickle(
+            f"../data/outcomes_squashed/outcomes_squashed_{embedding}.pkl"
+        )
