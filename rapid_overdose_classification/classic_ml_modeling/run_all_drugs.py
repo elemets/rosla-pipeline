@@ -12,7 +12,6 @@ all_drug_cols = [
     "Benzodiazepines",
     "Others",
     "Any Drugs",
-    "Drug No Opioids",
 ]
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ def predict_bert(input_data, model, text_col):
 
     model = AutoModelForSequenceClassification.from_pretrained(
         f"../../models/bert_models/{model}",
-        num_labels=11,
+        num_labels=10,
         problem_type="multi_label_classification",
     ).to(device)
 

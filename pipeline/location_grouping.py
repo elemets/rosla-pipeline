@@ -17,7 +17,6 @@ columns_to_check = [
     "Benzodiazepines",
     "Others",
     "Any Drugs",
-    "Drug No Opioids",
     "EventAddress",
 ]
 

@@ -17,7 +17,6 @@ drug_cols = [
     "Benzodiazepines",
     "Others",
     "Any Drugs",
-    "Drug No Opioids",
 ]
 
 
@@ -32,6 +31,5 @@ cols_needed = [
     "Benzodiazepines",
     "Others",
     "Any Drugs",
-    "Drug No Opioids",
     "text",
 ]

@@ -17,7 +17,6 @@ drug_cols = [
     "Benzodiazepines",
     "Others",
     "Any Drugs",
-    "Drug No Opioids",
 ]
 
 
