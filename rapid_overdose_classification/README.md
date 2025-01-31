@@ -89,7 +89,6 @@ These are the different outputs in the data:
 - "Benzodiazepines"
 - "Others"
 - "Any Drugs"
-- "Drug No Opioids"
 
 ### Multi label
 

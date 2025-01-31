@@ -3,6 +3,7 @@ from transformers import (
     AutoModelForSequenceClassification,
     TrainingArguments,
     Trainer,
+    EarlyStoppingCallback,
 )
 from datasets import Dataset
 from sklearn.model_selection import train_test_split
@@ -17,6 +18,10 @@ from helpers import (
     drug_cols,
     cols_needed,
 )
+import random
+import os
+import json
+from sklearn.metrics import f1_score
 from constants import (
     cols_needed,
     drug_cols,
@@ -27,6 +32,21 @@ from constants import (
     train_epochs,
     device,
 )
+
+
+def find_best_threshold_for_label(probs_i, true_i, step=0.01):
+    thresholds = np.arange(0.0, 1.0 + step, step)
+    best_thr = 0.0
+    best_score = 0.0
+
+    for t in thresholds:
+        preds_i = (probs_i >= t).astype(int)
+        score = f1_score(true_i, preds_i, average="binary")
+        if score > best_score:
+            best_score = score
+            best_thr = t
+
+    return best_thr, best_score
 
 
 def bert_model_train(input_data, bert_type):
@@ -51,8 +71,15 @@ def bert_model_train(input_data, bert_type):
     8. Evaluates the model on the validation dataset.
     9. Saves the trained model to a specified directory.
     """
+    seed_value = 42
+    random.seed(seed_value)
+    np.random.seed(seed_value)
+    torch.manual_seed(seed_value)
+    # If you have a GPU:
+    torch.cuda.manual_seed_all(seed_value)
+
     if bert_type == "BERT":
-        bert_id = ("google-bert/bert-base-cased",)
+        bert_id = "google-bert/bert-base-cased"
     else:
         bert_id = "emilyalsentzer/Bio_ClinicalBERT"
 
@@ -102,7 +129,7 @@ def bert_model_train(input_data, bert_type):
     # Loading the BERT pretrained model for classification
     model = AutoModelForSequenceClassification.from_pretrained(
         bert_id,
-        num_labels=11,
+        num_labels=10,
         problem_type="multi_label_classification",
     ).to(device)
 
@@ -122,6 +149,7 @@ def bert_model_train(input_data, bert_type):
         num_train_epochs=train_epochs,
         weight_decay=wd,
         load_best_model_at_end=True,
+        seed=42,
     )
 
     trainer = Trainer(
@@ -131,17 +159,37 @@ def bert_model_train(input_data, bert_type):
         eval_dataset=val_ds,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
     )
 
     model_path = f"../../models/{model_type}/"
 
     # Train, evaluate, and save the model
     trainer.train()
+
+    # Finding best threshold
+    val_output = trainer.predict(val_ds)
+    val_logits = val_output.predictions
+    val_labels = val_output.label_ids
+    val_probs = torch.sigmoid(torch.tensor(val_logits)).numpy()
+    best_thresholds = {}
+    for index, drug_col in enumerate(drug_cols):
+        thr, score = find_best_threshold_for_label(
+            val_probs[:, index], val_labels[:, index]
+        )
+        best_thresholds[drug_col] = thr
+        print(f"best threshold for: {drug_col} is {thr} with score {score}")
+
+    print(best_thresholds)
     print("Evaluating Model:")
     evaluation = trainer.evaluate()
     print(evaluation)
     print(f"Saving trained and evaluated model to: {model_path}")
     trainer.save_model(model_path)
+
+    thresholds_path = os.path.join(model_path, "best_thresholds.json")
+    with open(thresholds_path, "w") as f:
+        json.dump(best_thresholds, f, indent=4)
 
 
 if __name__ == "__main__":

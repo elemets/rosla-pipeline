@@ -13,12 +13,16 @@ from sklearn.metrics import (
     roc_auc_score,
     hamming_loss,
 )
+import json
+
 from tqdm import tqdm
 import numpy as np
 import mlflow
 
 
-def evaluate_bert_models(input_data, model_type, batch_size=16):
+def evaluate_bert_models(
+    input_data, model_type, external_dataset_or_test, batch_size=16
+):
     """
     Evaluates BERT models on a given dataset with batching.
 
@@ -79,11 +83,24 @@ def evaluate_bert_models(input_data, model_type, batch_size=16):
             all_labels.append(labels.cpu())
 
     predicted_probabilities = torch.sigmoid(torch.cat(all_logits))
-    y_pred = (predicted_probabilities > 0.5).int()
-    y_true_np = torch.cat(all_labels).numpy()
-    y_pred_np = y_pred.numpy()
+    predicted_probabilities_np = predicted_probabilities.numpy()
 
-    roc_auc = roc_auc_score(y_true_np, predicted_probabilities.numpy(), average="macro")
+    # Create an array for predictions
+    y_pred_np = np.zeros_like(predicted_probabilities_np)
+    thresholds_path = f"../../models/{model_type}/best_thresholds.json"
+    with open(thresholds_path, "r") as f:
+        best_thresholds = json.load(f)
+
+    # Loop over each label index and name in drug_cols
+    for idx, label_name in enumerate(drug_cols):
+        thr = best_thresholds[label_name]  # get the threshold for this specific label
+        y_pred_np[:, idx] = (predicted_probabilities_np[:, idx] >= thr).astype(int)
+
+    y_true_np = torch.cat(all_labels).numpy()
+    print(predicted_probabilities)
+    print(y_true_np)
+    print(y_pred_np)
+    # roc_auc = roc_auc_score(y_true_np, predicted_probabilities.numpy(), average="macro")
     accuracy = accuracy_score(y_true_np, y_pred_np)
     hamming = hamming_loss(y_true_np, y_pred_np)
     precision = precision_score(y_true_np, y_pred_np, average="macro")
@@ -96,71 +113,83 @@ def evaluate_bert_models(input_data, model_type, batch_size=16):
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
     print(f"Macro F1 Score: {f1}")
-    print(f"Macro AUC ROC: {roc_auc}")
+    # print(f"Macro AUC ROC: {roc_auc}")
 
-    # Log results with MLflow
-    experiment_name = f"External Dataset"
-    mlflow.set_experiment(experiment_name)
-    with mlflow.start_run(run_name=f"Finetuned model {model_type}") as parent_run:
-        mlflow.log_metric("Hamming Loss", hamming)
-        mlflow.log_metric("macro f1", f1)
-        mlflow.log_metric("macro roc_auc", roc_auc)
-        mlflow.log_metric("accuracy", accuracy)
+    if int(external_dataset_or_test):
+        experiment_name = f"External Dataset"
+        mlflow.set_experiment(experiment_name)
+        with mlflow.start_run(run_name=f"Finetuned model {model_type}") as parent_run:
+            mlflow.log_metric("Hamming Loss", hamming)
+            mlflow.log_metric("macro f1", f1)
+            # mlflow.log_metric("macro roc_auc", roc_auc)
+            mlflow.log_metric("accuracy", accuracy)
 
-    output_df = pd.DataFrame({"text": texts})
+        output_df = pd.DataFrame({"text": texts})
 
-    class_metrics = {}
+        class_metrics = {}
 
-    for i, drug in enumerate(drug_cols):
-        output_df[drug] = y_true_np[:, i]
-        output_df[f"{drug}_pred"] = y_pred_np[:, i]
-        output_df[f"{drug}_prob"] = predicted_probabilities[:, i]
+        for i, drug in enumerate(drug_cols):
+            output_df[drug] = y_true_np[:, i]
+            output_df[f"{drug}_pred"] = y_pred_np[:, i]
+            output_df[f"{drug}_prob"] = predicted_probabilities[:, i]
 
-        # Calculate metrics for this class
-        class_acc = accuracy_score(y_true_np[:, i], y_pred_np[:, i])
-        class_prec = precision_score(y_true_np[:, i], y_pred_np[:, i])
-        class_rec = recall_score(y_true_np[:, i], y_pred_np[:, i])
-        class_f1 = f1_score(y_true_np[:, i], y_pred_np[:, i])
-        class_roc_auc = roc_auc_score(
-            y_true_np[:, i], predicted_probabilities[:, i].numpy()
-        )
+            # Calculate metrics for this class
+            class_acc = accuracy_score(y_true_np[:, i], y_pred_np[:, i])
+            class_prec = precision_score(y_true_np[:, i], y_pred_np[:, i])
+            class_rec = recall_score(y_true_np[:, i], y_pred_np[:, i])
+            class_f1 = f1_score(y_true_np[:, i], y_pred_np[:, i])
+            # class_roc_auc = roc_auc_score(
+            #     y_true_np[:, i], predicted_probabilities[:, i].numpy()
+            # )
 
-        # Store metrics
-        class_metrics[drug] = {
-            "accuracy": class_acc,
-            "precision": class_prec,
-            "recall": class_rec,
-            "f1": class_f1,
-            "roc_auc": class_roc_auc,
-        }
+            # Store metrics
+            class_metrics[drug] = {
+                "accuracy": class_acc,
+                "precision": class_prec,
+                "recall": class_rec,
+                "f1": class_f1,
+                # "roc_auc": class_roc_auc,
+            }
 
-    for i, drug in enumerate(drug_cols):
-        output_df[drug] = y_true_np[:, i]
-        output_df[f"{drug}_pred"] = y_pred_np[:, i]
-        output_df[f"{drug}_prob"] = predicted_probabilities[:, i]
+        for i, drug in enumerate(drug_cols):
+            output_df[drug] = y_true_np[:, i]
+            output_df[f"{drug}_pred"] = y_pred_np[:, i]
+            output_df[f"{drug}_prob"] = predicted_probabilities[:, i]
 
-    mismatch_mask = False
-    for drug in drug_cols:
-        mismatch_mask = mismatch_mask | (output_df[drug] != output_df[f"{drug}_pred"])
+        mismatch_mask = False
+        for drug in drug_cols:
+            mismatch_mask = mismatch_mask | (
+                output_df[drug] != output_df[f"{drug}_pred"]
+            )
 
-    # Create a metrics summary DataFrame
-    metrics_df = pd.DataFrame(class_metrics).transpose()
-    print("\nMetrics Summary:")
-    print(metrics_df.round(4))
+        # Create a metrics summary DataFrame
+        metrics_df = pd.DataFrame(class_metrics).transpose()
+        print("\nMetrics Summary:")
+        print(metrics_df.round(4))
 
-    mismatches_df = output_df[mismatch_mask].copy()
+        mismatches_df = output_df[mismatch_mask].copy()
 
-    mismatches_df = mismatches_df.sort_values("text")
+        mismatches_df = mismatches_df.sort_values("text")
 
-    output_df.to_csv("../../reports/evaluated_res.csv")
+        output_df.to_csv("../../reports/evaluated_res.csv")
 
-    mismatches_df.to_csv("../../reports/predicted_wrong.csv")
+        mismatches_df.to_csv("../../reports/predicted_wrong.csv")
 
-    metrics_df.to_csv("../../reports/eval_metric.csv")
+        metrics_df.to_csv("../../reports/eval_metric.csv")
+
+    else:
+        experiment_name = f"Table 3 Results"
+        mlflow.set_experiment(experiment_name)
+        with mlflow.start_run(run_name=f"Finetuned model {model_type}") as parent_run:
+            mlflow.log_metric("Hamming Loss", hamming)
+            mlflow.log_metric("macro f1", f1)
+            # mlflow.log_metric("macro roc_auc", roc_auc)
+            mlflow.log_metric("accuracy", accuracy)
 
 
 if __name__ == "__main__":
     input_data = sys.argv[1]
     model_type = sys.argv[2]
-    batch_size = int(sys.argv[3]) if len(sys.argv) > 3 else 16
-    evaluate_bert_models(input_data, model_type, batch_size)
+    external_dataset = sys.argv[3]
+    batch_size = int(sys.argv[4]) if len(sys.argv) > 4 else 16
+    evaluate_bert_models(input_data, model_type, external_dataset, batch_size)
