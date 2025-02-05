@@ -269,11 +269,14 @@ if __name__ == "__main__":
             "CauseC",
             "CauseD",
             "Unnamed: 0.1",
+            "Unnamed: 0",
+            "address.death",
             "index__census",
             "OBJECTID_left",
             "OBJECTID_right",
         ],
         inplace=True,
+        errors="ignore",
     )
 
     ### Age clean up

@@ -40,35 +40,35 @@ class Geocoder:
         ### Trying to normalise the data so we can access the address columns
         if any(x in non_geocoded_df_cols for x in possible_death_add_names):
             non_geocoded_df = non_geocoded_df.rename(
-                columns={"Death Address": "DeathAddr", "Death Zip Code": "DeathZip"}
+                columns={"Death Address": "DeathAddress", "Death Zip Code": "DeathZip"}
             )
             non_geocoded_df = non_geocoded_df.rename(
-                columns={"DeathAddress": "DeathAddr", "Death Zip Code": "DeathZip"}
+                columns={"DeathAddress": "DeathAddress", "Death Zip Code": "DeathZip"}
             )
             non_geocoded_df = non_geocoded_df.rename(
-                columns={"DeathAdress": "DeathAddr"}
+                columns={"DeathAddr": "DeathAddress"}
             )
             non_geocoded_df = non_geocoded_df.rename(
                 columns={
-                    "Event Address": "EventAddr",
+                    "Event Address": "EventAddress",
                     "Event Zip": "EventZip",
-                    "EventCity": "EventCityDesc",
+                    "EventCityDesc": "EventCity",
                 }
             )
             non_geocoded_df = non_geocoded_df.rename(
                 columns={
-                    "EventAddress": "EventAddr",
+                    "EventAddr": "EventAddress",
                     "Event Zip": "EventZip",
-                    "EventCity": "EventCityDesc",
+                    "EventCityDesc": "EventCity",
                 }
             )
 
         # Combine columns into single columns and handle NaN values
         non_geocoded_df["address.death"] = non_geocoded_df[
-            ["DeathAddr", "DeathCity", "DeathZip"]
+            ["DeathAddress", "DeathCity", "DeathZip"]
         ].apply(lambda x: ", ".join(x.dropna().astype(str)), axis=1)
         non_geocoded_df["event.address"] = non_geocoded_df[
-            ["EventAddr", "EventCityDesc", "EventZip"]
+            ["EventAddress", "EventCity", "EventZip"]
         ].apply(lambda x: ", ".join(x.dropna().astype(str)), axis=1)
 
         # Replace 'UNKNOWN' and empty strings with NaN, clean addresses, and apply replacements

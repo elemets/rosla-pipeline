@@ -19,6 +19,25 @@ LOGFILE = "./pipeline_steps/logs/pipeline_summary.txt"
 MODEL_NAME = "bioclinicalbert"
 
 
+import os
+from pathlib import Path
+
+PROCESSED_FILES_LOG = "./pipeline_steps/logs/processed_files.txt"
+
+
+def load_processed_files():
+    if not os.path.exists(PROCESSED_FILES_LOG):
+        return set()
+    with open(PROCESSED_FILES_LOG, "r") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
+def update_processed_files(new_files):
+    with open(PROCESSED_FILES_LOG, "a") as f:
+        for file in new_files:
+            f.write(file + "\n")
+
+
 def rename_files(directory):
     logging.info("Renaming files to remove spaces...")
     for filepath in Path(directory).glob("*"):
@@ -93,7 +112,11 @@ def join_classified_data():
 def geocode_data():
     logging.info("Geocoding data...")
     input_file = os.path.join(OUTPUTDIR, "combined_classified_data.csv")
-    output_file = os.path.join(OUTPUTDIR, "combined_classified_data_geocoded.csv")
+
+    geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
+    os.makedirs(geocode_dir, exist_ok=True)  # Ensure the folder exists
+    output_file = os.path.join(geocode_dir, "combined_classified_data_geocoded.csv")
+
     subprocess.run(
         ["python", "geocode.py", "-i", input_file, "-o", output_file], check=True
     )
@@ -102,7 +125,8 @@ def geocode_data():
 
 def group_data_by_location():
     logging.info("Grouping data by location...")
-    input_file = os.path.join(OUTPUTDIR, "combined_classified_data_geocoded.csv")
+    geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
+    input_file = os.path.join(geocode_dir, "combined_classified_data_geocoded.csv")
     output_dir = OUTPUTDIR
     subprocess.run(
         ["python", "location_grouping.py", "-i", input_file, "-o", output_dir],
@@ -112,7 +136,9 @@ def group_data_by_location():
 
 
 def log_file_stats():
-    final_file = os.path.join(OUTPUTDIR, "combined_classified_data_geocoded.csv")
+    final_file = os.path.join(
+        OUTPUTDIR, "/geocoded/combined_classified_data_geocoded.csv"
+    )
     if not os.path.exists(final_file):
         final_file = os.path.join(OUTPUTDIR, "combined_classified_data.csv")
 
@@ -176,17 +202,19 @@ def log_file_stats():
             logger.info(log_line.strip())
 
 
-def join_similar_columns():
+def join_similar_columns_for_file(input_file, output_file=None):
+    """
+    Standardizes column names in a single CSV file by joining similar columns.
 
-    joined_data_loc = os.path.join(OUTPUTDIR, "combined_classified_data.csv")
-
-    dataframe = pd.read_csv(joined_data_loc)
-
-    print("BEFORE")
-    print(dataframe.shape)
+    Parameters:
+      input_file (str): Path to the input CSV file.
+      output_file (str): Path to save the output CSV file. If None, the input file is overwritten.
+    """
+    df = pd.read_csv(input_file)
+    print("Before standardization:", df.shape)
 
     column_groups = {
-        "CaseNumber": ["CaseNum", "CaseNumber", "Case Number"],
+        "CaseNumber": ["CaseNum", "CaseNumber", "Case Number", "Case#"],
         "ResidenceType": ["ResType", "ResidenceType", "Residence Type"],
         "DeathDate": [
             "DeathDate",
@@ -195,59 +223,168 @@ def join_similar_columns():
             "DateOfDeath",
             "DateofDeath",
         ],
-        "DeathTime": ["DeathTime", "Time of Death", "Death Time"],
+        "DeathTime": ["DeathTime", "Time of Death", "Death Time", "TimeofDeath"],
         "DeathAddress": [
+            "DeathAddress",
             "DeathAddr",
             "DeathAdress",
             "DeathAddr.1",
             "address.death",
             "DeathAdress.1",
+            "Death Address",
         ],
-        "DeathTime": ["TimeofDeath"],
-        "DeathZip": ["DeathZip", "DeathZip.1"],
+        "DeathZip": ["DeathZip", "DeathZip.1", "DeathZipCode", "DeathZi\np", "Zip"],
+        "DeathCity": ["DeathCity", "Death City", "DeathCityDesc"],
         "EventPlace": ["EventPlace", "Event Place"],
-        "EventAddress": ["EventAddr", "EventAddr.1", "eventaddress", "Event Address"],
-        "EventZip": ["EventZip", "EventZip.1"],
+        "EventAddress": [
+            "EventAddress",
+            "EventAddr",
+            "EventAddr.1",
+            "eventaddress",
+            "Event Address",
+        ],
+        "EventZip": [
+            "EventZip",
+            "EventZip.1",
+            "EventZi\np",
+            "EventZipCode",
+            "Zip.1",
+            "Event Zip",
+        ],
+        "EventCity": ["EventCity", "EventCityDesc"],
         "Mode": ["Mode", "Mode.1"],
         "CauseA": ["CauseA", "Cause A"],
         "CauseB": ["CauseB", "Cause B"],
         "CauseC": ["CauseC", "Cause C"],
         "CauseD": ["CauseD", "Cause D"],
-        "CauseOther": ["CauseOther", "Other Cause"],
-        "HowInjuryOccurred": ["HowInjuryOccurred", "InjuryDesc"],
+        "CauseOther": ["CauseOther", "Other Cause", "OtherCause"],
+        "HowInjuryOccurred": ["HowInjuryOccurred", "InjuryDesc", "HowInjuryOccu\nrred"],
         "FirstName": ["First Name"],
         "MiddleName": ["Middle Name"],
         "LastName": ["Last Name"],
         "DateofBirth": ["Date of Birth", "BirthDate"],
-        "Text": ["text"],
-        "Address": ["address"],  # Need to verify what this refers to
-        # Add any other columns as needed
+        "Text": ["Text", "text"],
+        "Address": ["Address", "address"],
     }
 
-    for new_col, old_cols in column_groups.items():
-        # Find which of the old columns exist in the DataFrame
-        existing_cols = [col for col in old_cols if col in dataframe.columns]
+    for new_col, variants in column_groups.items():
+        existing_cols = [col for col in variants if col in df.columns]
         if not existing_cols:
-            continue  # No columns to merge for this group
-        # Combine columns into the new column
-        dataframe[new_col] = dataframe[existing_cols].bfill(axis=1).iloc[:, 0]
-        # Drop the old columns
-        dataframe.drop(
-            columns=[col for col in existing_cols if col != new_col], inplace=True
+            continue
+
+        df[new_col] = df[existing_cols].bfill(axis=1).iloc[:, 0]
+
+        cols_to_drop = [col for col in existing_cols if col != new_col]
+        if cols_to_drop:
+            df.drop(columns=cols_to_drop, inplace=True)
+
+    print("After standardization:", df.shape)
+    print(df.columns)
+
+    if output_file is None:
+        output_file = input_file
+    df.to_csv(output_file, index=False)
+
+    print(f"Standardized file saved to: {output_file}")
+
+
+def get_new_raw_files(raw_dir):
+    processed = load_processed_files()
+    all_files = [str(p) for p in Path(raw_dir).glob("*") if p.is_file()]
+    new_files = [f for f in all_files if f not in processed]
+    return new_files
+
+
+def process_single_file(file_path):
+    # Determine the working file for classification.
+    if file_path.endswith(".pdf"):
+        basename = Path(file_path).stem
+        csv_file = os.path.join(CONVERTEDDIR, f"{basename}.csv")
+        if not os.path.exists(csv_file):
+            logger.info(f"Converting '{file_path}' to '{csv_file}'")
+            subprocess.run(
+                ["python", "pdf2csv.py", "-i", file_path, "-o", csv_file],
+                check=True,
+            )
+        working_file = csv_file
+    else:
+        working_file = file_path
+
+    # Classification (if not already classified)
+    basename = Path(working_file).stem
+    classified_file = os.path.join(CLASSIFIEDDIR, f"{basename}_classified.csv")
+    if not os.path.exists(classified_file):
+        logger.info(f"Classifying '{working_file}' to '{classified_file}'")
+        subprocess.run(
+            [
+                "python",
+                "classify.py",
+                "-i",
+                working_file,
+                "-o",
+                classified_file,
+                "-m",
+                MODEL_NAME,
+            ],
+            check=True,
         )
-    print("AFTER:")
-    print(dataframe.shape)
-    dataframe.to_csv(joined_data_loc)
+    else:
+        logger.info(f"'{classified_file}' already exists. Skipping classification.")
+
+    # (Optional) Run join_similar_columns on the file if needed.
+    # You can modify your join_similar_columns() function to accept a file path.
+    join_similar_columns_for_file(classified_file)
+
+    # Geocode the classified data for this file.
+    geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
+    os.makedirs(geocode_dir, exist_ok=True)
+    geocoded_file = os.path.join(geocode_dir, f"{basename}_geocoded.csv")
+    if not os.path.exists(geocoded_file):
+        logger.info(f"Geocoding data in '{classified_file}' -> '{geocoded_file}'")
+        subprocess.run(
+            ["python", "geocode.py", "-i", classified_file, "-o", geocoded_file],
+            check=True,
+        )
+    else:
+        logger.info(f"'{geocoded_file}' already exists. Skipping geocoding.")
+
+    append_to_master_geocoded(geocoded_file)
+
+
+def append_to_master_geocoded(new_geocoded_file):
+
+    geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
+    os.makedirs(geocode_dir, exist_ok=True)
+    master_file = os.path.join(geocode_dir, "combined_classified_data_geocoded.csv")
+
+    if os.path.exists(master_file):
+        master_df = pd.read_csv(master_file)
+    else:
+        master_df = pd.DataFrame()
+    new_df = pd.read_csv(new_geocoded_file)
+
+    combined_df = pd.concat([master_df, new_df], ignore_index=True)
+
+    # Remove duplicates based on "CaseNumber"
+    if "CaseNumber" in combined_df.columns:
+        combined_df = combined_df.drop_duplicates(subset=["CaseNumber"], keep="last")
+
+    # Save the updated master file
+    combined_df.to_csv(master_file, index=False)
+    print(f"Master geocoded data updated and saved to: {master_file}")
 
 
 def main():
     rename_files(RAWDIR)
-    convert_pdfs()
-    classify_csvs()
-    join_classified_data()
-    join_similar_columns()
-    geocode_data()
+
+    files_for_processing = get_new_raw_files(RAWDIR)
+    for file in files_for_processing:
+        process_single_file(file)
+    geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
+    input_file = os.path.join(geocode_dir, "combined_classified_data_geocoded.csv")
+    join_similar_columns_for_file(input_file)
     group_data_by_location()
+    update_processed_files(files_for_processing)
     log_file_stats()
     logging.info("Pipeline execution completed successfully.")
 
