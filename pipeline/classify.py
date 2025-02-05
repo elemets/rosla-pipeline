@@ -59,7 +59,7 @@ def predict(pred_df, model_name, location_of_file, batch_size=16):
     # Load the model and wrap it for multi-GPU
     model = AutoModelForSequenceClassification.from_pretrained(
         f"../models/{model_name}",
-        num_labels=11,
+        num_labels=10,
         problem_type="multi_label_classification",
     )
 

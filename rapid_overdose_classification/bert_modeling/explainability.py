@@ -98,7 +98,7 @@ def save_explainability(explain_df, model_type):
     for index, row in explain_df.iterrows():
         interpret(
             explain_df.loc[index]["text"],
-            f"../../reports/logs/bioclinicalBERT_explainability/{index}.html",
+            f"../../reports/bioclinicalBERT_explainability/{index}.html",
             true_labels=explain_df.loc[index]["true_labels"],
         )
     print("Done")
