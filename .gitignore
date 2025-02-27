@@ -7,6 +7,7 @@ __pycache__/
 Models/
 # C extensions
 *.so
+*.gpkg
 *.pkl
 # Distribution / packaging
 pipeline_venv

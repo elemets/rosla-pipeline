@@ -20,7 +20,27 @@ ready for input into the next step of the pipeline.
 class Geocoder:
     def __init__(self) -> None:
         tqdm.pandas()
+        self.la_boundary = gp.read_file("../data/LACountyBoundary.geojson")
+        if not self.la_boundary.crs:
+            self.la_boundary.set_crs(epsg=4326, inplace=True)
         pass
+
+    def is_point_in_la(self, point: Optional[Point]) -> bool:
+        """
+        Check if a point falls within LA County boundary
+
+        Args:
+            point (Point): Shapely Point object with coordinates or None
+
+        Returns:
+            bool: True if point is within LA County, False otherwise
+        """
+        if point is None or pd.isna(point):
+            return False
+        try:
+            return self.la_boundary.contains(point).any()
+        except (TypeError, ValueError):
+            return False
 
     def geocode(self, input_csv: str, output_csv: str) -> None:
         non_geocoded_df = pd.read_csv(input_csv)
@@ -111,26 +131,25 @@ class Geocoder:
             lat, lon, address = self.geocode_address(
                 row["eventaddress"], provider="arcgis"
             )
+            point = Point(lon, lat) if lat is not None and lon is not None else None
+
             if address is not None:  # Update DataFrame if geocoding was successful
                 non_geocoded_df.at[index, "geometry"] = Point(lon, lat)
                 non_geocoded_df.at[index, "address"] = address
 
-        for geom in non_geocoded_df["geometry"]:
-            if type(geom) == float:
-                geom = None
-                continue
+            if (point is None or not self.is_point_in_la(point)) and not pd.isna(
+                row["address.death"]
+            ):
+                lat, lon, address = self.geocode_address(
+                    row["address.death"], provider="arcgis"
+                )
+                point = Point(lon, lat) if lat is not None and lon is not None else None
+                if point is not None:
+                    non_geocoded_df.at[index, "used_death_address"] = True
 
-        filtered_df = non_geocoded_df[non_geocoded_df["geometry"].isna()]
-        if not filtered_df.empty:
-            locations_of_nulls = gp.tools.geocode(
-                filtered_df["address.death"], provider="arcgis", timeout=None
-            )
-            non_geocoded_df.loc[non_geocoded_df["geometry"].isna(), "geometry"] = (
-                locations_of_nulls["geometry"]
-            )
-            non_geocoded_df.loc[non_geocoded_df["geometry"].isna(), "address"] = (
-                locations_of_nulls["address"]
-            )
+            if point is not None:
+                non_geocoded_df.at[index, "geometry"] = point
+                non_geocoded_df.at[index, "address"] = address
 
         print("Extracting the longitude and latitude:")
         non_geocoded_df["lon"] = non_geocoded_df["geometry"].progress_apply(
@@ -138,6 +157,9 @@ class Geocoder:
         )
         non_geocoded_df["lat"] = non_geocoded_df["geometry"].progress_apply(
             self._extract_lat
+        )
+        non_geocoded_df["in_la_county"] = non_geocoded_df["geometry"].apply(
+            self.is_point_in_la
         )
 
         non_geocoded_df.to_csv(output_csv, index=False)
@@ -151,7 +173,7 @@ class Geocoder:
         time.sleep(0.2)
         if provider == "nominatim":
             geolocator = Nominatim(user_agent="geocodingapp")
-        else:  # Default to ArcGIS if not Nominatim
+        else:
             geolocator = ArcGIS()
         try:
             location = geolocator.geocode(address, timeout=10)
@@ -177,9 +199,16 @@ class Geocoder:
             address = address.replace(char, replacement)
         address = re.sub(r"[^\x00-\x7F]+", " ", address)
         address = re.sub(r'["\'*]', "", address)
+
+        # Remove hashtags and connected text (until whitespace)
+        address = re.sub(r"#\S*", "", address)
+
         address = re.sub(r"^,*|(?<=,),|,*$", "", address)
         address = re.sub(r",+", ",", address)
         address = re.sub(r"c/o|c/0|c/", "", address, flags=re.IGNORECASE)
+
+        # Clean up any multiple spaces that might result from removal
+        address = re.sub(r" +", " ", address).strip()
 
         return address
 

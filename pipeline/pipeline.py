@@ -25,6 +25,84 @@ from pathlib import Path
 PROCESSED_FILES_LOG = "./pipeline_steps/logs/processed_files.txt"
 
 
+def fill_from_historical(group, historical_data):
+    if len(group) == 1:
+        row = group.iloc[0]
+        if (
+            pd.isna(row["Age"])
+            and pd.isna(row["DateofBirth"])
+            and not historical_data.empty
+        ):
+            historical_match = historical_data[
+                historical_data["CaseNumber"] == row["CaseNumber"]
+            ]
+            if not historical_match.empty:
+                historical_match = historical_match[
+                    historical_match["Age"].notna()
+                    | historical_match["DateofBirth"].notna()
+                ]
+                if not historical_match.empty:
+                    latest_record = historical_match.iloc[-1]
+                    group.at[row.name, "Age"] = latest_record["Age"]
+                    group.at[row.name, "DateofBirth"] = latest_record["DateofBirth"]
+        return group
+
+    has_age_data = group["Age"].notna() | group["DateofBirth"].notna()
+    if has_age_data.any():
+        return group[has_age_data].iloc[[-1]]
+
+    if not historical_data.empty:
+        case_number = group["CaseNumber"].iloc[0]
+        historical_match = historical_data[
+            (historical_data["CaseNumber"] == case_number)
+            & (historical_data["Age"].notna() | historical_data["DateofBirth"].notna())
+        ]
+        if not historical_match.empty:
+            latest_historical = historical_match.iloc[-1]
+            group.iloc[-1, group.columns.get_loc("Age")] = latest_historical["Age"]
+            group.iloc[-1, group.columns.get_loc("DateofBirth")] = latest_historical[
+                "DateofBirth"
+            ]
+            return group.iloc[[-1]]
+
+    return group.iloc[[-1]]
+
+
+def load_historical_data(geocode_dir):
+    """
+    Load all previously geocoded files to create a reference dataset.
+
+    Parameters:
+        geocode_dir (str): Directory containing geocoded files
+
+    Returns:
+        pd.DataFrame: Combined historical data
+    """
+    historical_files = glob.glob(os.path.join(geocode_dir, "*_geocoded.csv"))
+    historical_files = [
+        f
+        for f in historical_files
+        if not f.endswith("combined_classified_data_geocoded.csv")
+    ]
+
+    if not historical_files:
+        return pd.DataFrame()
+
+    dfs = []
+    for file in historical_files:
+        try:
+            df = pd.read_csv(file)
+            if "CaseNumber" in df.columns:
+                dfs.append(df)
+        except Exception as e:
+            logging.warning(f"Could not load {file}: {str(e)}")
+
+    if not dfs:
+        return pd.DataFrame()
+
+    return pd.concat(dfs, ignore_index=True)
+
+
 def load_processed_files():
     if not os.path.exists(PROCESSED_FILES_LOG):
         return set()
@@ -211,7 +289,8 @@ def join_similar_columns_for_file(input_file, output_file=None):
       output_file (str): Path to save the output CSV file. If None, the input file is overwritten.
     """
     df = pd.read_csv(input_file)
-    print("Before standardization:", df.shape)
+    print("Before standardization:")
+    print(df.columns)
 
     column_groups = {
         "CaseNumber": ["CaseNum", "CaseNumber", "Case Number", "Case#"],
@@ -278,7 +357,7 @@ def join_similar_columns_for_file(input_file, output_file=None):
         if cols_to_drop:
             df.drop(columns=cols_to_drop, inplace=True)
 
-    print("After standardization:", df.shape)
+    print("After standardization:")
     print(df.columns)
 
     if output_file is None:
@@ -365,9 +444,19 @@ def append_to_master_geocoded(new_geocoded_file):
 
     combined_df = pd.concat([master_df, new_df], ignore_index=True)
 
-    # Remove duplicates based on "CaseNumber"
+    historical_data = load_historical_data(geocode_dir)
+
+    """
+    This ensures that:
+    We now check old dataframes for the same data if we are missing data.
+    If a CaseNumber has any rows with Age/DOB data, we keep the most recent one with data
+    If a CaseNumber has no rows with Age/DOB data, we keep the most recent row
+    Single rows are preserved regardless of whether they have Age/DOB data
+    """
     if "CaseNumber" in combined_df.columns:
-        combined_df = combined_df.drop_duplicates(subset=["CaseNumber"], keep="last")
+        combined_df = combined_df.groupby("CaseNumber", group_keys=False).apply(
+            lambda x: fill_from_historical(x, historical_data)
+        )
 
     # Save the updated master file
     combined_df.to_csv(master_file, index=False)
