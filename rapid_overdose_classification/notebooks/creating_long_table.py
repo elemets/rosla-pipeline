@@ -17,31 +17,43 @@ drug_cols = [
     "Any Drugs",
 ]
 
-# --- 2. Aggregate overdose counts by ZIPCODE AND Year ---
-df_subset = latest_df[["ZIPCODE", "Year"] + drug_cols].copy()
-df_agg = df_subset.groupby(["ZIPCODE", "Year"])[drug_cols].sum().reset_index()
+# Columns to keep in the detailed table (adjust as needed)
+# e.g. ZIPCODE, Year, Age, Gender, Race, etc.
+id_vars = ["ZIPCODE", "Year", "Age_Bin", "Age", "Gender", "Race"]
 
-# Rename columns for clarity (e.g., Alcohol -> Alcohol_Count)
-df_agg.columns = ["ZIPCODE", "Year"] + [f"{col}_Count" for col in drug_cols]
-
-# --- 3. Create the Long Table ---
-# Melt the aggregated DataFrame so that each row represents one drug type's count for a given ZIPCODE and Year.
-long_table = df_agg.melt(
-    id_vars=["ZIPCODE", "Year"],
-    value_vars=[f"{col}_Count" for col in drug_cols],
+# 1. Melt raw data so each row is (Case x Drug)
+long_df = latest_df.melt(
+    id_vars=id_vars,
+    value_vars=drug_cols,
     var_name="Overdose_Type",
-    value_name="Overdose_Count",
+    value_name="Occurred",
 )
 
-# --- 4. Add a Composite Key ---
-# This key combines ZIPCODE, Year, and Overdose_Type.
-long_table["composite_key"] = (
-    long_table["ZIPCODE"].astype(str)
+# 2. Keep only rows where the drug was involved
+long_df = long_df[long_df["Occurred"] == 1].drop(columns=["Occurred"])
+
+# 3. Create the composite key for normal (per-year) records
+long_df["composite_key"] = (
+    long_df["ZIPCODE"].astype(str)
     + "_"
-    + long_table["Year"].astype(str)
+    + long_df["Year"].astype(str)
     + "_"
-    + long_table["Overdose_Type"]
+    + long_df["Overdose_Type"]
+    + "_Count"
 )
 
-# --- 5. Save the Table for Filtering Charts ---
-long_table.to_csv("long_table_for_charts.csv", index=False)
+# 4. Duplicate each record as "All" year
+long_df_all = long_df.copy()
+long_df_all["Year"] = "All"
+long_df_all["composite_key"] = (
+    long_df_all["ZIPCODE"].astype(str)
+    + "_All_"
+    + long_df_all["Overdose_Type"]
+    + "_Count"
+)
+
+# 5. Combine the per-year records + the all-year records
+long_df_final = pd.concat([long_df, long_df_all], ignore_index=True)
+
+# 6. Save the detailed table (CSV) for your charts
+long_df_final.to_csv("detailed_long_table_with_all_years.csv", index=False)
