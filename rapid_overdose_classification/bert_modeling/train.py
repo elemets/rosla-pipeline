@@ -162,7 +162,7 @@ def bert_model_train(input_data, bert_type):
         callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
     )
 
-    model_path = f"../../models/{model_type}/"
+    model_path = f"../../models/bert_models/{model_type}/"
 
     # Train, evaluate, and save the model
     trainer.train()

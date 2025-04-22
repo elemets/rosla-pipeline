@@ -47,9 +47,9 @@ def evaluate_bert_models(
     texts = eval_df["text"].tolist()
     y_true = eval_df[drug_cols].values
 
-    tokenizer = AutoTokenizer.from_pretrained(f"../../models/{model_type}")
+    tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model_type}")
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../../models/{model_type}",
+        f"../../models/bert_models/{model_type}",
         num_labels=len(drug_cols),
         problem_type="multi_label_classification",
     ).to(device)
@@ -87,7 +87,7 @@ def evaluate_bert_models(
 
     # Create an array for predictions
     y_pred_np = np.zeros_like(predicted_probabilities_np)
-    thresholds_path = f"../../models/{model_type}/best_thresholds.json"
+    thresholds_path = f"../../models/bert_models/{model_type}/best_thresholds.json"
     with open(thresholds_path, "r") as f:
         best_thresholds = json.load(f)
 
@@ -171,11 +171,11 @@ def evaluate_bert_models(
 
         mismatches_df = mismatches_df.sort_values("text")
 
-        output_df.to_csv("../../reports/evaluated_res.csv")
+        output_df.to_csv("../../reports/evaluated_res_internal_test_removedmislabels_n_model.csv")
 
-        mismatches_df.to_csv("../../reports/predicted_wrong.csv")
+        mismatches_df.to_csv("../../reports/predicted_wrong_internal_test_removedmislabels_n_model.csv")
 
-        metrics_df.to_csv("../../reports/eval_metric.csv")
+        metrics_df.to_csv("../../reports/eval_metric_internal_test_removedmislabels_n_model.csv")
 
     else:
         experiment_name = f"Table 3 Results"
