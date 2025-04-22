@@ -16,9 +16,9 @@ import json
 def save_explainability(explain_df, model_type):
 
     ### Loading the finetunedBERT model
-    tokenizer = AutoTokenizer.from_pretrained(f"../../models/{model_type}")
+    tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model_type}")
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../../models/{model_type}",
+        f"../../models/bert_models/{model_type}",
         num_labels=len(drug_cols),
         problem_type="multi_label_classification",
     ).to(device)
@@ -62,7 +62,7 @@ def save_explainability(explain_df, model_type):
 
     ### Defining the sigmoid curve and using this to
     ### Normalise the predicted outputs
-    thresholds_path = f"../../models/{model_type}/best_thresholds.json"
+    thresholds_path = f"../../models/bert_models/{model_type}/best_thresholds.json"
     with open(thresholds_path, "r") as f:
         best_thresholds = json.load(f)
 

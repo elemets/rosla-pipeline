@@ -159,7 +159,7 @@ def multi_label_classifier(model_type):
         mlflow.log_metric("ROC AUC", roc_auc)
 
         dumpObjects(
-            model, f"../../models//classic_ml_models/multi_label/{model_type}.pkl"
+            model, f"../../models/classic_ml_models/multi_label/{model_type}.pkl"
         )
 
 
