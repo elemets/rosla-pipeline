@@ -1,16 +1,15 @@
 import pandas as pd
 import sys
 from datasets import Dataset
-from constants import (
-    device,
-)
+from constants import device, drug_cols
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
 )
-
+import numpy as np
 import torch
 from datetime import datetime
+import json
 
 
 def predict_bert(input_data, model, text_col):
@@ -38,12 +37,9 @@ def predict_bert(input_data, model, text_col):
     """
     # Load data to do the prediction on
     pred_df = pd.read_csv(input_data)
-    # Extract text from input
     texts = pred_df[text_col].tolist()
-    # Load the correct tokenizer
     tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model}")
 
-    # Tokenize the text
     inputs = tokenizer(
         texts, return_tensors="pt", padding="max_length", truncation=True
     )
@@ -54,19 +50,24 @@ def predict_bert(input_data, model, text_col):
         problem_type="multi_label_classification",
     ).to(device)
 
-    # Make predictions
     with torch.no_grad():
         outputs = model(**inputs)
 
-    # Get predicted probabilities
     logits = outputs.logits
     predicted_probabilities = torch.sigmoid(logits)
+    predicted_probabilities_np = predicted_probabilities.numpy()
+    y_pred_np = np.zeros_like(predicted_probabilities_np)
+    thresholds_path = f"../../models/bert_models/{model_type}/best_thresholds.json"
+    with open(thresholds_path, "r") as f:
+        best_thresholds = json.load(f)
 
-    # Convert probabilities to binary (0 or 1) predictions
-    y_pred = (predicted_probabilities > 0.5).int()
+    # Loop over each label index and name in drug_cols
+    for idx, label_name in enumerate(drug_cols):
+        thr = best_thresholds[label_name]  # get the threshold for this specific label
+        y_pred_np[:, idx] = (predicted_probabilities_np[:, idx] >= thr).astype(int)
 
     pred_df["predict_prob"] = predicted_probabilities
-    pred_df["pred"] = y_pred
+    pred_df["pred"] = y_pred_np
     current_time = datetime.now()
 
     # Format the date and time for a filename
