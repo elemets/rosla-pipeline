@@ -1,4 +1,4 @@
-from constants import model_list
+from rapid_overdose_classification.constants import model_list
 import pandas as pd
 import numpy as np
 import mlflow
@@ -12,7 +12,7 @@ from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 from sklearn.base import clone
 from NaiveSVC import NaivelyCalibratedLinearSVC
-
+from rapid_overdose_classification.config import mlflow_uri
 import sys
 from tqdm import tqdm
 
@@ -24,7 +24,7 @@ def glove_single_label(drug):
     These will be logged to a different location on MLFlow.
     """
     experiment_name = f"GloVe Embeddings Bootstrapped"
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
     mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run(run_name=f"{drug}") as parent_run:

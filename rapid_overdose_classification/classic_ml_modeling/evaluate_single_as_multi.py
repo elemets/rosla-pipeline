@@ -96,7 +96,7 @@ def predict_all_models(X_column, models_dict):
 
 
 def evaluate_classic_models(embedder: str, text_input: str):
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
 
     model_dict = load_models_for_outcome(embedder)
 

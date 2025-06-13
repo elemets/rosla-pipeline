@@ -12,25 +12,16 @@ from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 from sklearn.base import clone
 from NaiveSVC import NaivelyCalibratedLinearSVC
-
-import sys
 from tqdm import tqdm
+import typer
+from rapid_overdose_classification.config import mlflow_uri
 
 
 def cui_single_label(drug):
-
-    ### this patch helps to speed up sklearn in general
-    ### but especially SVC which is veeeery slow due
-    ### to using the probabiltiy=True (which is needed to generate roc_auc etc.)
     sklearnex.patch_sklearn()
     drug_df = pd.read_pickle("../../data/outcomes_squashed/outcomes_squashed_cui.pkl")
 
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-
-    """
-    Repeat with CUIs and log to a new experiment on Mlflow.
-    CUI vectors are in the drug_df['vector'] column
-    """
+    mlflow.set_tracking_uri(mlflow_uri)
 
     experiment_name = f"CUIs Bootstrapped"
     mlflow.set_experiment(experiment_name)
@@ -43,7 +34,6 @@ def cui_single_label(drug):
         for model_name in tqdm(model_list):
             with mlflow.start_run(run_name=f"{model_name}", nested=True) as child_run:
 
-                #### splitting and working out ratios for scale pos weight
                 y = drug_df[drug].values
                 X = drug_df["vector"].values
 
@@ -63,9 +53,7 @@ def cui_single_label(drug):
 
                 if model_name == "Random Forest":
                     estimator = RandomForestClassifier(class_weight="balanced")
-
                     estimator_name = "rf"
-
                     tuned_parameters = {
                         f"{estimator_name}__max_depth": [3, 5, 10],
                         f"{estimator_name}__n_estimators": [10, 100],
@@ -73,22 +61,16 @@ def cui_single_label(drug):
                         f"{estimator_name}__min_samples_leaf": [1, 2, 3],
                     }
                 elif model_name == "Logistic Regression":
-
                     estimator = LogisticRegression(
                         class_weight="balanced", C=1, max_iter=1000
                     )
-
                     estimator_name = "lg"
-                    # Set the parameters by cross-validation
                     tuned_parameters = [{estimator_name + "__C": np.logspace(-4, 0, 3)}]
                 elif model_name == "XGBoost":
-
                     estimator = XGBClassifier(
                         objective="binary:logistic", scale_pos_weight=scale_pos_weight
                     )
-
                     estimator_name = "xgb"
-
                     tuned_parameters = {
                         f"{estimator_name}__max_depth": [3, 5, 10, 15],
                         f"{estimator_name}__learning_rate": [0.03, 0.003, 0.001],
@@ -96,18 +78,12 @@ def cui_single_label(drug):
                         f"{estimator_name}__n_jobs": [-2],
                     }
                 elif model_name == "SVM":
-
                     estimator = NaivelyCalibratedLinearSVC(class_weight="balanced")
                     estimator_name = "svm"
-
                     tuned_parameters = {
                         f"{estimator_name}__tol": [0.0001, 0.03, 0.003],
                         f"{estimator_name}__C": [1, 0.05, 0.5, 0.1],
                     }
-
-                ### This is where the difference is
-                ### The X and y are slightly different shapes because of
-                ### the way the embeddings are generated.
 
                 kfold = True
                 calibrate = False
@@ -132,12 +108,9 @@ def cui_single_label(drug):
                 print(f"Tuning hyperparameters for: {drug}")
 
                 model.grid_search_param_tuning(X_train, y_train, f1_beta_tune=True)
-
                 model.fit(X_train, y_train, score="roc_auc")
-
                 model.return_metrics(X_train, y_train, optimal_threshold=True)
 
-                ### Logging the validation results to MLFflow
                 classreport = model.classification_report
 
                 mlflow.log_metric(
@@ -155,8 +128,6 @@ def cui_single_label(drug):
                 X_test = pd.DataFrame(X_test)
                 y_test = pd.Series(y_test)
 
-                ## Using the updated model tuner class to return bootstrapped metrics
-                ## For the f1 score. This is needed to recreate David's paper
                 bootstrap_metrics = model.return_bootstrap_metrics(
                     X_test,
                     y_test,
@@ -198,6 +169,13 @@ def cui_single_label(drug):
         )
 
 
-if __name__ == "__main__":
-    drug = sys.argv[1]
+app = typer.Typer()
+
+
+@app.command()
+def main(drug: str = typer.Argument(help="Drug name to train models for")):
     cui_single_label(drug)
+
+
+if __name__ == "__main__":
+    app()
