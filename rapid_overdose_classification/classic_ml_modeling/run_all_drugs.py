@@ -1,18 +1,7 @@
 import subprocess
 import sys
+from rapid_overdose_classification.constants import all_drug_cols
 
-all_drug_cols = [
-    "Methamphetamine",
-    "Heroin",
-    "Cocaine",
-    "Fentanyl",
-    "Alcohol",
-    "Prescription.opioids",
-    "Any Opioids",
-    "Benzodiazepines",
-    "Others",
-    "Any Drugs",
-]
 
 if __name__ == "__main__":
 

@@ -1,3 +1,11 @@
+model_list = [
+    "Logistic Regression",
+    "Random Forest",
+    "XGBoost",
+    "SVM",
+]
+
+
 other_cols_to_squash = [
     "Anticonvulsant",
     "Antihistamine",

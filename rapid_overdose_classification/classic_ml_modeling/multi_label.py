@@ -11,7 +11,7 @@ from sklearn.metrics import (
 import sys
 from model_tuner import Model, train_val_test_split
 from model_tuner.pickleObjects import dumpObjects
-from constants import all_drug_cols
+from rapid_overdose_classification.constants import all_drug_cols
 from sklearn.metrics import hamming_loss, make_scorer
 from xgboost import XGBClassifier
 from sklearn.multioutput import MultiOutputClassifier
@@ -20,6 +20,7 @@ from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.ensemble import RandomForestClassifier
 from model_tuner.bootstrapper import evaluate_bootstrap_metrics
 import typer
+from rapid_overdose_classification.config import mlflow_uri
 
 
 def multi_label_classifier(model_type):
@@ -33,7 +34,7 @@ def multi_label_classifier(model_type):
     """
 
     patch_sklearn()
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
     experiment_name = f"Multi Label"
     mlflow.set_experiment(experiment_name)
 

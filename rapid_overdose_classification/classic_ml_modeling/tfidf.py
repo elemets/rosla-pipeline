@@ -1,4 +1,4 @@
-from constants import all_drug_cols, model_list
+from rapid_overdose_classification.constants import model_list
 import pandas as pd
 import numpy as np
 import mlflow
@@ -16,6 +16,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import sys
 from tqdm import tqdm
 from NaiveSVC import NaivelyCalibratedLinearSVC
+from rapid_overdose_classification.config import mlflow_uri
 
 """
 Loops explained:
@@ -38,7 +39,7 @@ def tf_idf_single_label(drug):
     sklearnex.patch_sklearn()
     drug_df = pd.read_pickle("../../data/outcomes_squashed/outcomes_squashed.pkl")
 
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
 
     experiment_name = f"TFIDF Bootstrapped"
     mlflow.set_experiment(experiment_name)

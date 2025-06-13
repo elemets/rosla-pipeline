@@ -26,7 +26,7 @@ def bioclinicalbert_single_label(drug):
         "../../data/outcomes_squashed/outcomes_squashed_bioclinicalbert.pkl"
     )
 
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
 
     """
     Repeat the same steps but using the bioclinicalBERT embeddings.

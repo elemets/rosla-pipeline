@@ -36,7 +36,7 @@ def evaluate_bert_models(
         None
     """
 
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
 
     if input_data.endswith(".pkl"):
         eval_df = pd.read_pickle(input_data)
