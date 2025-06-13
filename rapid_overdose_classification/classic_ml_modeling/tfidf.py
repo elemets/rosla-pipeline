@@ -11,7 +11,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 from sklearn.base import clone
-from sklearn.svm import SVC
 from sklearn.feature_extraction.text import TfidfVectorizer
 import sys
 from tqdm import tqdm
