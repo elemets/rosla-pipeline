@@ -10,9 +10,10 @@ import numpy as np
 import torch
 from datetime import datetime
 import json
+import time
 
 
-def predict_bert(input_data, model, text_col):
+def predict_bert(input_data, model_type, text_col):
     """
     Predicts labels for a given dataset using a BERT model.
 
@@ -23,40 +24,47 @@ def predict_bert(input_data, model, text_col):
 
     Returns:
         None
-
-    This function performs the following steps:
-    1. Loads the input data from a CSV file.
-    2. Extracts text data from the specified column.
-    3. Loads the appropriate BERT tokenizer.
-    4. Tokenizes the text data.
-    5. Loads the pre-trained BERT model for sequence classification.
-    6. Makes predictions on the input data.
-    7. Converts predicted probabilities to binary predictions.
-    8. Adds the predicted probabilities and binary predictions to the DataFrame.
-    9. Saves the predictions to a CSV file with a timestamped filename.
     """
     # Load data to do the prediction on
     pred_df = pd.read_csv(input_data)
     texts = pred_df[text_col].tolist()
-    tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model}")
+    tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model_type}")
 
-    inputs = tokenizer(
-        texts, return_tensors="pt", padding="max_length", truncation=True
-    )
+    # Process texts in batches to avoid overflow
+    all_probs = []
+    batch_size = 8  # Adjust based on memory constraints
 
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../../models/bert_models/{model}",
+        f"../../models/bert_models/{model_type}",
         num_labels=10,
         problem_type="multi_label_classification",
     ).to(device)
 
-    with torch.no_grad():
-        outputs = model(**inputs)
+    for i in range(0, len(texts), batch_size):
+        batch_texts = texts[i : i + batch_size]
 
-    logits = outputs.logits
-    predicted_probabilities = torch.sigmoid(logits)
-    predicted_probabilities_np = predicted_probabilities.numpy()
+        # Use a conservative max_length value
+        inputs = tokenizer(
+            batch_texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512,  # Fixed smaller value to avoid overflow
+        ).to(device)
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        batch_probs = torch.sigmoid(outputs.logits).cpu().numpy()
+        all_probs.append(batch_probs)
+
+    # Combine all batches
+    predicted_probabilities_np = np.vstack(all_probs)
+
+    # We've already processed all batches and stored results in predicted_probabilities_np
     y_pred_np = np.zeros_like(predicted_probabilities_np)
+
+    # Fix the path to use the model parameter instead of model_type
     thresholds_path = f"../../models/bert_models/{model_type}/best_thresholds.json"
     with open(thresholds_path, "r") as f:
         best_thresholds = json.load(f)
@@ -66,10 +74,12 @@ def predict_bert(input_data, model, text_col):
         thr = best_thresholds[label_name]  # get the threshold for this specific label
         y_pred_np[:, idx] = (predicted_probabilities_np[:, idx] >= thr).astype(int)
 
-    pred_df["predict_prob"] = predicted_probabilities
-    pred_df["pred"] = y_pred_np
-    current_time = datetime.now()
+    # Store predictions in DataFrame
+    for idx, label_name in enumerate(drug_cols):
+        pred_df[f"predict_prob_{label_name}"] = predicted_probabilities_np[:, idx]
+        pred_df[f"pred_{label_name}"] = y_pred_np[:, idx]
 
+    current_time = datetime.now()
     # Format the date and time for a filename
     filename_time = current_time.strftime("%Y%m%d_%H%M")
 
@@ -82,4 +92,8 @@ if __name__ == "__main__":
     input_data_loc = sys.argv[1]
     text_col = sys.argv[2]
     model_type = sys.argv[3]
+    start_time = time.time()
     predict_bert(input_data_loc, model_type, text_col)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Total execution time: {elapsed_time:.2f} seconds")
