@@ -13,19 +13,8 @@ from sklearn.metrics import (
 )
 import mlflow
 import typer
-
-drug_cols = [
-    "Methamphetamine",
-    "Heroin",
-    "Cocaine",
-    "Fentanyl",
-    "Alcohol",
-    "Prescription.opioids",
-    "Any Opioids",
-    "Benzodiazepines",
-    "Others",
-    "Any Drugs",
-]
+from rapid_overdose_classification.constants import drug_cols
+from rapid_overdose_classification.config import mlflow_uri
 
 
 def load_models_for_outcome(embedding_type):
