@@ -12,10 +12,11 @@ from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 from sklearn.base import clone
 from sklearn.feature_extraction.text import TfidfVectorizer
-import sys
 from tqdm import tqdm
 from NaiveSVC import NaivelyCalibratedLinearSVC
 from rapid_overdose_classification.config import mlflow_uri
+import typer
+
 
 """
 Loops explained:
@@ -31,10 +32,6 @@ easier to have one file.
 
 
 def tf_idf_single_label(drug):
-
-    ### this patch helps to speed up sklearn in general
-    ### but especially SVC which is veeeery slow due
-    ### to using the probabiltiy=True (which is needed to generate roc_auc etc.)
     sklearnex.patch_sklearn()
     drug_df = pd.read_pickle("../../data/outcomes_squashed/outcomes_squashed.pkl")
 
@@ -54,9 +51,7 @@ def tf_idf_single_label(drug):
 
                 if model_name == "Random Forest":
                     estimator = RandomForestClassifier(class_weight="balanced")
-
                     estimator_name = "rf"
-
                     tuned_parameters = {
                         f"{estimator_name}__max_depth": [3, 5, 10, None],
                         f"{estimator_name}__n_estimators": [10, 100, 200],
@@ -64,22 +59,16 @@ def tf_idf_single_label(drug):
                         f"{estimator_name}__min_samples_leaf": [1, 2, 3],
                     }
                 elif model_name == "Logistic Regression":
-
                     estimator = LogisticRegression(
                         class_weight="balanced", C=1, max_iter=1000
                     )
-
                     estimator_name = "lg"
-                    # Set the parameters by cross-validation
                     tuned_parameters = [{estimator_name + "__C": np.logspace(-4, 0, 3)}]
                 elif model_name == "XGBoost":
-
                     estimator = XGBClassifier(
                         objective="binary:logistic",
                     )
-
                     estimator_name = "xgb"
-
                     tuned_parameters = {
                         f"{estimator_name}__max_depth": [3, 5, 10],
                         f"{estimator_name}__learning_rate": [0.03, 0.003],
@@ -87,20 +76,14 @@ def tf_idf_single_label(drug):
                         f"{estimator_name}__n_jobs": [-2],
                     }
                 elif model_name == "SVM":
-
                     estimator = NaivelyCalibratedLinearSVC(class_weight="balanced")
                     estimator_name = "svm"
-
                     tuned_parameters = {
                         f"{estimator_name}__tol": [0.0001, 0.03, 0.003],
                         f"{estimator_name}__C": [1, 0.05, 0.5, 0.1],
                     }
 
-                ### This is where the difference is
-                ### The X and y are slightly different shapes because of
-                ### the way the embeddings are generated.
                 y = drug_df[drug].values
-                # X = np.stack(X, axis=0)
                 X = drug_df["string_text"].values
                 X_train, X_test, y_train, y_test = train_test_split(
                     X, y, test_size=0.2, random_state=42
@@ -108,7 +91,6 @@ def tf_idf_single_label(drug):
                 kfold = True
                 calibrate = False
 
-                ### We need tf_idf as part of the pipeline to stop dataleaking
                 model = Model(
                     name=f"{model_name}",
                     estimator_name=estimator_name,
@@ -129,12 +111,9 @@ def tf_idf_single_label(drug):
                 print(f"Tuning hyperparameters for: {drug}")
 
                 model.grid_search_param_tuning(X_train, y_train, f1_beta_tune=False)
-
                 model.fit(X_train, y_train, score="roc_auc")
-
                 model.return_metrics(X_train, y_train)
 
-                ### Logging the validation results to MLFflow
                 classreport = model.classification_report
 
                 mlflow.log_metric(
@@ -149,8 +128,6 @@ def tf_idf_single_label(drug):
 
                 y_prob = model.predict_proba(X_test)[:, 1]
 
-                ## Using the updated model tuner class to return bootstrapped metrics
-                ## For the f1 score. This is needed to recreate David's paper
                 bootstrap_metrics = model.return_bootstrap_metrics(
                     X_test,
                     y_test,
@@ -196,6 +173,13 @@ def tf_idf_single_label(drug):
             )
 
 
-if __name__ == "__main__":
-    drug = sys.argv[1]
+app = typer.Typer()
+
+
+@app.command()
+def main(drug: str = typer.Argument(help="Drug name to train models for")):
     tf_idf_single_label(drug)
+
+
+if __name__ == "__main__":
+    app()
