@@ -14,7 +14,8 @@ from sklearn.metrics import (
     hamming_loss,
 )
 import json
-
+from model_tuner.bootstrapper import evaluate_bootstrap_metrics
+import typer
 from tqdm import tqdm
 import numpy as np
 import mlflow
@@ -100,7 +101,7 @@ def evaluate_bert_models(
     print(predicted_probabilities)
     print(y_true_np)
     print(y_pred_np)
-    # roc_auc = roc_auc_score(y_true_np, predicted_probabilities.numpy(), average="macro")
+    roc_auc = roc_auc_score(y_true_np, predicted_probabilities.numpy(), average="macro")
     accuracy = accuracy_score(y_true_np, y_pred_np)
     hamming = hamming_loss(y_true_np, y_pred_np)
     precision = precision_score(y_true_np, y_pred_np, average="macro")
@@ -113,7 +114,7 @@ def evaluate_bert_models(
     print(f"Precision: {precision}")
     print(f"Recall: {recall}")
     print(f"Macro F1 Score: {f1}")
-    # print(f"Macro AUC ROC: {roc_auc}")
+    print(f"Macro AUC ROC: {roc_auc}")
 
     if int(external_dataset_or_test):
         experiment_name = f"External Dataset"
@@ -121,8 +122,32 @@ def evaluate_bert_models(
         with mlflow.start_run(run_name=f"Finetuned model {model_type}") as parent_run:
             mlflow.log_metric("Hamming Loss", hamming)
             mlflow.log_metric("macro f1", f1)
-            # mlflow.log_metric("macro roc_auc", roc_auc)
+            mlflow.log_metric("macro roc_auc", roc_auc)
             mlflow.log_metric("accuracy", accuracy)
+
+        results = evaluate_bootstrap_metrics(
+            y=y_true_np,
+            y_pred_prob=predicted_probabilities_np,
+            thresholds=best_thresholds,
+            metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
+            n_samples=1000,
+            num_resamples=1000,
+            average="macro",
+            balance=False,
+        )
+
+        bootstrap_metrics_dict = results.to_dict(orient="records")
+
+        for metric in bootstrap_metrics_dict:
+            mlflow.log_metric(f"{metric['Metric']}_mean", metric["Mean"])
+            mlflow.log_metric(
+                f"{metric['Metric']}_95_CI_low",
+                metric["95% CI Lower"],
+            )
+            mlflow.log_metric(
+                f"{metric['Metric']}_95_CI_high",
+                metric["95% CI Upper"],
+            )
 
         output_df = pd.DataFrame({"text": texts})
 
@@ -138,9 +163,9 @@ def evaluate_bert_models(
             class_prec = precision_score(y_true_np[:, i], y_pred_np[:, i])
             class_rec = recall_score(y_true_np[:, i], y_pred_np[:, i])
             class_f1 = f1_score(y_true_np[:, i], y_pred_np[:, i])
-            # class_roc_auc = roc_auc_score(
-            #     y_true_np[:, i], predicted_probabilities[:, i].numpy()
-            # )
+            class_roc_auc = roc_auc_score(
+                y_true_np[:, i], predicted_probabilities[:, i].numpy()
+            )
 
             # Store metrics
             class_metrics[drug] = {
@@ -148,7 +173,7 @@ def evaluate_bert_models(
                 "precision": class_prec,
                 "recall": class_rec,
                 "f1": class_f1,
-                # "roc_auc": class_roc_auc,
+                "roc_auc": class_roc_auc,
             }
 
         for i, drug in enumerate(drug_cols):
@@ -171,11 +196,17 @@ def evaluate_bert_models(
 
         mismatches_df = mismatches_df.sort_values("text")
 
-        output_df.to_csv("../../reports/evaluated_res_internal_test_removedmislabels_n_model.csv")
+        output_df.to_csv(
+            "../../reports/evaluated_res_external_removedmislabels_n_model.csv"
+        )
 
-        mismatches_df.to_csv("../../reports/predicted_wrong_internal_test_removedmislabels_n_model.csv")
+        mismatches_df.to_csv(
+            "../../reports/predicted_wrong_external_removedmislabels_n_model.csv"
+        )
 
-        metrics_df.to_csv("../../reports/eval_metric_internal_test_removedmislabels_n_model.csv")
+        metrics_df.to_csv(
+            "../../reports/eval_metric_external_removedmislabels_n_model.csv"
+        )
 
     else:
         experiment_name = f"Table 3 Results"
@@ -186,10 +217,51 @@ def evaluate_bert_models(
             # mlflow.log_metric("macro roc_auc", roc_auc)
             mlflow.log_metric("accuracy", accuracy)
 
+            results = evaluate_bootstrap_metrics(
+                y=y_true_np,
+                y_pred_prob=predicted_probabilities_np,
+                thresholds=best_thresholds,
+                metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
+                n_samples=1000,
+                num_resamples=1000,
+                average="macro",
+                balance=False,
+            )
+
+            bootstrap_metrics_dict = results.to_dict(orient="records")
+
+            for metric in bootstrap_metrics_dict:
+                mlflow.log_metric(f"{metric['Metric']}_mean", metric["Mean"])
+                mlflow.log_metric(
+                    f"{metric['Metric']}_95_CI_low",
+                    metric["95% CI Lower"],
+                )
+                mlflow.log_metric(
+                    f"{metric['Metric']}_95_CI_high",
+                    metric["95% CI Upper"],
+                )
+
+
+app = typer.Typer(help="Evaluation of bert style models")
+
+
+@app.command()
+def main(
+    input_data: str = typer.Argument(
+        "../../data/test_set.csv",
+        help="input test data",
+    ),
+    model_type: str = typer.Argument(
+        "bioclinicalbert", help="bert or bioclinicalbert model types"
+    ),
+    external_dataset: int = typer.Argument(
+        0, help="specify whether it's internal or external dataset"
+    ),
+    batch_size: int = typer.Argument(16, help="Batch size for evaluating dataset"),
+):
+
+    evaluate_bert_models(input_data, model_type, external_dataset, batch_size)
+
 
 if __name__ == "__main__":
-    input_data = sys.argv[1]
-    model_type = sys.argv[2]
-    external_dataset = sys.argv[3]
-    batch_size = int(sys.argv[4]) if len(sys.argv) > 4 else 16
-    evaluate_bert_models(input_data, model_type, external_dataset, batch_size)
+    app()

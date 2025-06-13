@@ -1,53 +1,18 @@
-import sys
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import typer
+from rapid_overdose_classification.constants import (
+    drug_cols_comb,
+    drug_cols_opioids,
+    drug_cols,
+    benzo_cols_to_squash,
+    other_cols_to_squash,
+)
 
 tqdm.pandas()
 
-other_cols_to_squash = [
-    "Anticonvulsant",
-    "Antihistamine",
-    "Anti-psychotic",
-    "MDA",
-    "MDMA",
-    "Anti-Depressant",
-    "Muscle Relaxants",
-    "Barbiturates",
-    "Hallucinogens",
-    "Amphetamine",
-]
-
-benzo_cols_to_squash = ["Xanax", "Flualprazolam"]
-
-### Defining the columns for the classification report
-drug_cols = [
-    "Methamphetamine",
-    "Heroin",
-    "Cocaine",
-    "Fentanyl",
-    "Alcohol",
-    "Prescription.opioids",
-    "Any Opioids",
-    "Benzodiazepines",
-    "Others",
-]
-
-drug_cols_comb = [
-    "Methamphetamine",
-    "Heroin",
-    "Cocaine",
-    "Fentanyl",
-    "Alcohol",
-    "Prescription.opioids",
-    "Any Opioids",
-    "Benzodiazepines",
-    "Others",
-    "Any Drugs",
-]
-
-
-drug_cols_opioids = ["Heroin", "Opioid", "Fentanyl", "Prescription.opioids"]
+app = typer.Typer(help="Preprocessing outcome columns and combining embedding files")
 
 
 def prepping_outcome_cols(input_data):
@@ -142,32 +107,130 @@ def set_any_opioids(row):
 
 
 def combine_embedding_files():
-    cui = pd.read_pickle(f"../data/outcomes_squashed/outcomes_squashed_cui.pkl")
+    """
+    Combine embedding files from different methods into a single dataframe.
+
+    Returns:
+        pd.DataFrame: Combined dataframe with all embeddings and outcomes.
+    """
+    print("Loading embedding files...")
+    cui = pd.read_pickle("../data/outcomes_squashed/outcomes_squashed_cui.pkl")
     bioclin = pd.read_pickle(
-        f"../data/outcomes_squashed/outcomes_squashed_bioclinicalbert.pkl"
+        "../data/outcomes_squashed/outcomes_squashed_bioclinicalbert.pkl"
     )
-    glove = pd.read_pickle(f"../data/outcomes_squashed/outcomes_squashed_glove.pkl")
+    glove = pd.read_pickle("../data/outcomes_squashed/outcomes_squashed_glove.pkl")
+
+    print("Combining embeddings...")
     combined_df = pd.DataFrame()
     combined_df["text"] = cui["text"]
     combined_df["vector"] = cui["vector"]
     combined_df["clinBERTEmbed"] = bioclin["clinBERTEmbed"]
     combined_df["GloVE_proc"] = glove["GloVE_proc"]
     combined_df[drug_cols_comb] = bioclin[drug_cols_comb]
-    print(combined_df.columns.tolist())
-    print("Saving combined pkl file")
+
+    print("Combined dataframe columns:", combined_df.columns.tolist())
     return combined_df
 
 
-if __name__ == "__main__":
-    input_loc = sys.argv[1]
+@app.command()
+def process(
+    input_file: str = typer.Argument(
+        help="Input pickle file name (without path, e.g., 'cui_vec_test.pkl')"
+    ),
+    embedding_type: str = typer.Argument(
+        help="Type of embedding (e.g., 'cui', 'bioclinicalbert', 'glove')"
+    ),
+    input_dir: str = typer.Option(
+        "../data/different_embeddings/", help="Directory containing input files"
+    ),
+    output_dir: str = typer.Option(
+        "../data/outcomes_squashed/", help="Directory to save output files"
+    ),
+):
+    """
+    Process a single embedding file by preprocessing outcome columns.
+    """
+    input_path = f"{input_dir}{input_file}"
+    output_path = f"{output_dir}outcomes_squashed_{embedding_type}.pkl"
 
-    if input_loc == "combine":
+    print(f"Loading data from: {input_path}")
+    try:
+        input_df = pd.read_pickle(input_path)
+        print(f"Loaded dataframe with shape: {input_df.shape}")
+    except FileNotFoundError:
+        typer.echo(f"Error: File {input_path} not found.", err=True)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error loading file: {e}", err=True)
+        raise typer.Exit(1)
+
+    print("Processing outcome columns...")
+    cols_squished_df = prepping_outcome_cols(input_df)
+
+    print(f"Saving processed data to: {output_path}")
+    cols_squished_df.to_pickle(output_path)
+    print(f"Successfully processed {embedding_type} embeddings!")
+    print(f"Output shape: {cols_squished_df.shape}")
+
+
+@app.command()
+def combine(
+    input_dir: str = typer.Option(
+        "../data/outcomes_squashed/",
+        help="Directory containing embedding files to combine",
+    ),
+    output_dir: str = typer.Option(
+        "../data/outcomes_squashed/", help="Directory to save combined file"
+    ),
+    output_filename: str = typer.Option(
+        "combined_data.pkl", help="Name of the output combined file"
+    ),
+):
+    """
+    Combine multiple embedding files into a single dataframe.
+    """
+    print("Starting combination process...")
+
+    try:
         comb_df = combine_embedding_files()
-        comb_df.to_pickle("../data/outcomes_squashed/combined_data.pkl")
-    else:
-        embedding = sys.argv[2]
-        input_df = pd.read_pickle(f"../data/different_embeddings/{input_loc}")
-        cols_squished_df = prepping_outcome_cols(input_df)
-        cols_squished_df.to_pickle(
-            f"../data/outcomes_squashed/outcomes_squashed_{embedding}.pkl"
+        output_path = f"{output_dir}{output_filename}"
+
+        print(f"Saving combined file to: {output_path}")
+        comb_df.to_pickle(output_path)
+        print(f"Successfully saved combined dataframe!")
+        print(f"Combined dataframe shape: {comb_df.shape}")
+        print(f"Final columns: {comb_df.columns.tolist()}")
+
+    except FileNotFoundError as e:
+        typer.echo(f"Error: Required embedding file not found: {e}", err=True)
+        typer.echo(
+            "Make sure you have run the process command for cui, bioclinicalbert, and glove embeddings first.",
+            err=True,
         )
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.echo(f"Error during combination: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def info():
+    """
+    Display information about available drug columns and preprocessing steps.
+    """
+    print("Drug Columns Information:")
+    print("=" * 50)
+    print(f"Main drug columns: {drug_cols}")
+    print(f"Opioid columns: {drug_cols_opioids}")
+    print(f"Combined drug columns: {drug_cols_comb}")
+    print(f"Benzo columns to squash: {benzo_cols_to_squash}")
+    print(f"Other columns to squash: {other_cols_to_squash}")
+    print("\nProcessing Steps:")
+    print("1. Squash 'Others' columns into single 'Others' column")
+    print("2. Squash 'Benzodiazepines' columns into single 'Benzodiazepines' column")
+    print("3. Create 'Any Opioids' column")
+    print("4. Create 'Any Drugs' column")
+
+
+if __name__ == "__main__":
+    app()

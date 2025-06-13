@@ -1,4 +1,5 @@
 from model_tuner import loadObjects
+from model_tuner.bootstrapper import evaluate_bootstrap_metrics
 import os
 import sys
 import pandas as pd
@@ -10,8 +11,8 @@ from sklearn.metrics import (
     roc_auc_score,
     f1_score,
 )
-from sklearn.preprocessing import MultiLabelBinarizer
 import mlflow
+import typer
 
 drug_cols = [
     "Methamphetamine",
@@ -94,13 +95,8 @@ def predict_all_models(X_column, models_dict):
     return predictions_df, probabilities_df
 
 
-if __name__ == "__main__":
-    import sys
-
+def evaluate_classic_models(embedder: str, text_input: str):
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
-
-    embedder = sys.argv[1]
-    text_input = sys.argv[2]
 
     model_dict = load_models_for_outcome(embedder)
 
@@ -164,3 +160,52 @@ if __name__ == "__main__":
         mlflow.log_metric("macro f1", f1)
         mlflow.log_metric("macro roc_auc", roc_auc)
         mlflow.log_metric("accuracy", accuracy)
+
+        best_thresholds = [
+            model_dict[col].threshold["roc_auc"] for col in probabilities_df.columns
+        ]
+
+        results = evaluate_bootstrap_metrics(
+            y=true_values,
+            y_pred_prob=probability_values,
+            thresholds=best_thresholds,
+            metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
+            n_samples=1000,
+            num_resamples=1000,
+            average="macro",
+            balance=False,
+        )
+
+        bootstrap_metrics_dict = results.to_dict(orient="records")
+
+        for metric in bootstrap_metrics_dict:
+            mlflow.log_metric(f"{metric['Metric']}_mean", metric["Mean"])
+            mlflow.log_metric(
+                f"{metric['Metric']}_95_CI_low",
+                metric["95% CI Lower"],
+            )
+            mlflow.log_metric(
+                f"{metric['Metric']}_95_CI_high",
+                metric["95% CI Upper"],
+            )
+
+
+app = typer.Typer(
+    help="Evaluation of classic ML models (evaluating single as multi label)"
+)
+
+
+@app.command()
+def main(
+    embedder: str = typer.Argument(
+        "bioclinicalbert", help="Embedding type (bioclinicalbert, cuis, glove)"
+    ),
+    text_input: str = typer.Argument(
+        "../../data/test_set.pkl", help="Path to the input text data file"
+    ),
+):
+    evaluate_classic_models(embedder, text_input)
+
+
+if __name__ == "__main__":
+    app()

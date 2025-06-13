@@ -18,6 +18,8 @@ from sklearn.multioutput import MultiOutputClassifier
 from sklearnex import patch_sklearn
 from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.ensemble import RandomForestClassifier
+from model_tuner.bootstrapper import evaluate_bootstrap_metrics
+import typer
 
 
 def multi_label_classifier(model_type):
@@ -158,11 +160,49 @@ def multi_label_classifier(model_type):
         mlflow.log_metric("Accuracy Test", accuracy)
         mlflow.log_metric("ROC AUC", roc_auc)
 
+        best_thresholds = [model.threshold["hamming_loss"]] * len(all_drug_cols)
+
+        results = evaluate_bootstrap_metrics(
+            y=y_test,
+            y_pred_prob=y_prob,
+            thresholds=best_thresholds,
+            metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
+            n_samples=1000,
+            num_resamples=1000,
+            average="macro",
+            balance=False,
+        )
+
+        bootstrap_metrics_dict = results.to_dict(orient="records")
+
+        for metric in bootstrap_metrics_dict:
+            mlflow.log_metric(f"{metric['Metric']}_mean", metric["Mean"])
+            mlflow.log_metric(
+                f"{metric['Metric']}_95_CI_low",
+                metric["95% CI Lower"],
+            )
+            mlflow.log_metric(
+                f"{metric['Metric']}_95_CI_high",
+                metric["95% CI Upper"],
+            )
+
         dumpObjects(
             model, f"../../models/classic_ml_models/multi_label/{model_type}.pkl"
         )
 
 
-if __name__ == "__main__":
-    model_type = sys.argv[1]
+app = typer.Typer(help="Training of multi-label classifiers")
+
+
+@app.command()
+def main(
+    model_type: str = typer.Argument(
+        "RandomForest",
+        help="Type of multi label classifier to train (RandomForest or XGBoost)",
+    ),
+):
     multi_label_classifier(model_type)
+
+
+if __name__ == "__main__":
+    app()
