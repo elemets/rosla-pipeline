@@ -1,38 +1,41 @@
-from constants import all_drug_cols, model_list
 import pandas as pd
 import numpy as np
 import mlflow
 import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
-from model_tuner import Model, loadObjects, dumpObjects
+from model_tuner import Model, dumpObjects
 import sklearnex
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from xgboost import XGBClassifier
 from sklearn.base import clone
-from NaiveSVC import NaivelyCalibratedLinearSVC
-import sys
+from xgboost import XGBClassifier
 from tqdm import tqdm
+import typer
+from rapid_overdose_classification.constants import (
+    model_list,
+    PROCESSED_DATA_BIOCLINICALBERT_DIR,
+)
+from rapid_overdose_classification.config import (
+    MLFLOW_URI,
+    BOOTSTRAP_METRICS,
+    model_parameters,
+    N_ITER,
+    N_SPLITS,
+    RANDOM_GRID,
+    RANDOM_STATE,
+    STRATIFY_Y,
+    BOOTSTRAP_NUM_RESAMPLES,
+    BOOTSTRAP_NUM_SAMPLES,
+    MODEL_SCORING_METRIC,
+    OPTIMAL_THRESH,
+    KFOLD,
+)
 
 
 def bioclinicalbert_single_label(drug):
-    ### this patch helps to speed up sklearn in general
-    ### but especially SVC which is veeeery slow due
-    ### to using the probabiltiy=True (which is needed to generate roc_auc etc.)
     sklearnex.patch_sklearn()
-    drug_df = pd.read_pickle(
-        "../../data/outcomes_squashed/outcomes_squashed_bioclinicalbert.pkl"
-    )
+    drug_df = pd.read_pickle(PROCESSED_DATA_BIOCLINICALBERT_DIR)
 
-    mlflow.set_tracking_uri(mlflow_uri)
-
-    """
-    Repeat the same steps but using the bioclinicalBERT embeddings.
-    The drug_df['clinBERTEmbed'] column contains the bioclinicalBERT embeddings.
-    Log to a different location on mlflow. 
-    """
+    mlflow.set_tracking_uri(MLFLOW_URI)
 
     experiment_name = f"bioclinicalBERT Bootstrapped"
     mlflow.set_experiment(experiment_name)
@@ -53,87 +56,47 @@ def bioclinicalbert_single_label(drug):
                 n_samples, sequence_length, n_features = X.shape
                 X = X.reshape(-1, n_features)
                 X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=0.2, random_state=42
+                    X, y, test_size=0.2, random_state=RANDOM_STATE
                 )
 
-                positive_count = np.sum(y)
-                negative_count = len(y) - positive_count
-                scale_pos_weight = negative_count / positive_count
-
-                if model_name == "Random Forest":
-                    estimator = RandomForestClassifier(
-                        class_weight="balanced", n_jobs=-2
-                    )
-
-                    estimator_name = "rf"
-
-                    tuned_parameters = {
-                        f"{estimator_name}__max_depth": [3, 5, 10],
-                        f"{estimator_name}__n_estimators": [10, 100],
-                        f"{estimator_name}__max_features": [1, 3, 5, 7],
-                        f"{estimator_name}__min_samples_leaf": [1, 2, 3],
-                    }
-                elif model_name == "Logistic Regression":
-
-                    estimator = LogisticRegression(
-                        class_weight="balanced", C=1, max_iter=2000, n_jobs=-2
-                    )
-
-                    estimator_name = "lg"
-                    # Set the parameters by cross-validation
-                    tuned_parameters = [{estimator_name + "__C": np.logspace(-4, 0, 3)}]
-                elif model_name == "XGBoost":
+                # Special handling for XGBoost scale_pos_weight
+                if model_name == "XGBoost":
+                    positive_count = np.sum(y)
+                    negative_count = len(y) - positive_count
+                    scale_pos_weight = negative_count / positive_count
 
                     estimator = XGBClassifier(
                         objective="binary:logistic",
                         scale_pos_weight=scale_pos_weight,
                     )
-
-                    estimator_name = "xgb"
-
-                    tuned_parameters = {
-                        f"{estimator_name}__max_depth": [3, 5, 10, 15],
-                        f"{estimator_name}__learning_rate": [0.03, 0.003, 0.001],
-                        f"{estimator_name}__n_estimators": [50, 10, 100, 200],
-                        f"{estimator_name}__n_jobs": [-2],
-                    }
-                elif model_name == "SVM":
-
-                    estimator = NaivelyCalibratedLinearSVC(class_weight="balanced")
-                    estimator_name = "svm"
-
-                    tuned_parameters = {
-                        f"{estimator_name}__tol": [0.0001, 0.03, 0.003],
-                        f"{estimator_name}__C": [1, 0.05, 0.5, 0.1],
-                    }
-
-                kfold = True
-                calibrate = False
+                else:
+                    estimator = clone(model_parameters[model_name]["estimator"])
 
                 model = Model(
                     name=f"{model_name}",
-                    estimator_name=estimator_name,
+                    estimator_name=model_parameters[model_name]["estimator_name"],
                     model_type="classification",
-                    calibrate=calibrate,
-                    estimator=clone(estimator),
-                    kfold=kfold,
-                    stratify_y=True,
-                    grid=tuned_parameters,
-                    randomized_grid=True,
-                    n_iter=10,
-                    scoring=["roc_auc"],
-                    n_splits=10,
+                    calibrate=False,
+                    estimator=estimator,
+                    kfold=KFOLD,
+                    stratify_y=STRATIFY_Y,
+                    grid=model_parameters[model_name]["tuned_parameters"],
+                    randomized_grid=RANDOM_GRID,
+                    n_iter=N_ITER,
+                    scoring=[MODEL_SCORING_METRIC],
+                    boost_early=model_parameters[model_name]["xgbearly"],
+                    n_splits=N_SPLITS,
                     n_jobs=-2,
-                    random_state=42,
+                    random_state=RANDOM_STATE,
                 )
 
                 print(f"Tuning hyperparameters for: {drug}")
 
-                model.grid_search_param_tuning(X_train, y_train, f1_beta_tune=True)
-
+                model.grid_search_param_tuning(
+                    X_train, y_train, f1_beta_tune=OPTIMAL_THRESH
+                )
                 model.fit(X_train, y_train)
-
-                model.return_metrics(X_train, y_train, True)
+                model.return_metrics(X_train, y_train, OPTIMAL_THRESH)
 
                 ### Logging the validation results to MLFflow
                 classreport = model.classification_report
@@ -153,15 +116,13 @@ def bioclinicalbert_single_label(drug):
                 X_test = pd.DataFrame(X_test)
                 y_test = pd.Series(y_test)
 
-                ## Using the updated model tuner class to return bootstrapped metrics
-                ## For the f1 score. This is needed to recreate David's paper
                 bootstrap_metrics = model.return_bootstrap_metrics(
                     X_test,
                     y_test,
-                    ["f1_macro", "roc_auc", "average_precision"],
-                    num_resamples=1000,
-                    n_samples=1000,
-                    threshold=model.threshold["roc_auc"],
+                    BOOTSTRAP_METRICS,
+                    num_resamples=BOOTSTRAP_NUM_RESAMPLES,
+                    n_samples=BOOTSTRAP_NUM_SAMPLES,
+                    threshold=model.threshold[MODEL_SCORING_METRIC],
                     balance=False,
                 )
                 bootstrap_metrics_dict = bootstrap_metrics.to_dict(orient="records")
@@ -177,13 +138,18 @@ def bioclinicalbert_single_label(drug):
                         metric["95% CI Upper"],
                     )
 
-                y_pred = model.predict(X_test, optimal_threshold=True)
+                y_pred = model.predict(X_test, optimal_threshold=OPTIMAL_THRESH)
 
                 cm = confusion_matrix(y_test, y_pred)
                 cm_display = ConfusionMatrixDisplay(cm)
                 cm_display.plot()
                 plt.title(f"Confusion Matrix for: {drug} on test set")
                 mlflow.log_figure(cm_display.figure_, f"confusion matrix {drug}.png")
+
+                for param, value in model.best_params_per_score[model.scoring[0]][
+                    "params"
+                ].items():
+                    mlflow.log_param(param, value)
 
                 average_precision_metric = next(
                     (
@@ -207,6 +173,13 @@ def bioclinicalbert_single_label(drug):
         )
 
 
-if __name__ == "__main__":
-    drug = sys.argv[1]
+app = typer.Typer()
+
+
+@app.command()
+def main(drug: str = typer.Argument(help="Drug name to train models for")):
     bioclinicalbert_single_label(drug)
+
+
+if __name__ == "__main__":
+    app()

@@ -53,7 +53,7 @@ An example of the usage:
 
 ``python dataset.py cui_vec.pkl cui``
 
-This will output our final usable .pkl file to outcomes_squashed_cui.pkl
+This will output our final usable .pkl file to processed_data_cui.pkl
 
 This file will work for each embedding if you want to combine the embeddings to use just one file for all three then run this:
 
@@ -110,7 +110,7 @@ The two model types to choose from are:
 ### Training
 
 To train the BERT models we use the train.py file in the bert_modeling directory.
-This takes the input_location and model_type parameters. The input_location path should be ``outcomes_squashed.pkl``.
+This takes the input_location and model_type parameters. The input_location path should be ``processed_data.pkl``.
 This is the output of all of our preprocessing steps.
 
 The model_type parameter can be either "BERT" or "bioclinicalbert".
@@ -120,7 +120,7 @@ Usage:
 ``python train.py {input_data_loc} {model_type}``
 
 And an example of how it is used:
-``python train.py outcomes_squashed.pkl bioclinicalbert``
+``python train.py processed_data.pkl bioclinicalbert``
 
 The model should be saved under /models/model_type/ in the root directory of this project.
 
