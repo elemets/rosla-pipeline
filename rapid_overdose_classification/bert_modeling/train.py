@@ -1,3 +1,4 @@
+import typer
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -10,21 +11,15 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
 import torch
-import sys
-import torch
-from helpers import (
-    compute_metrics,
-    TokenizeFunc,
-    drug_cols,
-    cols_needed,
-)
 import random
 import os
 import json
 from sklearn.metrics import f1_score
-from constants import (
-    cols_needed,
-    drug_cols,
+from helpers import (
+    compute_metrics,
+    TokenizeFunc,
+)
+from rapid_overdose_classification.bert_modeling.config import (
     batch_size,
     lr,
     metric,
@@ -32,6 +27,15 @@ from constants import (
     train_epochs,
     device,
 )
+from rapid_overdose_classification.bert_modeling.constants import (
+    cols_needed,
+    drug_cols,
+    MODEL_PATH,
+    DATA_PATH,
+)
+
+
+app = typer.Typer()
 
 
 def find_best_threshold_for_label(probs_i, true_i, step=0.01):
@@ -49,7 +53,7 @@ def find_best_threshold_for_label(probs_i, true_i, step=0.01):
     return best_thr, best_score
 
 
-def bert_model_train(input_data, bert_type):
+def bert_model_train(input_data: str, bert_type: str):
     """
     Trains a BERT model on a given dataset.
 
@@ -84,7 +88,7 @@ def bert_model_train(input_data, bert_type):
         bert_id = "emilyalsentzer/Bio_ClinicalBERT"
 
     tokenizer = AutoTokenizer.from_pretrained(bert_id)
-    drug_data = pd.read_pickle(f"../../data/processed_data/{input_data}")
+    drug_data = pd.read_pickle(f"{DATA_PATH}{input_data}")
     tokenFunc = TokenizeFunc(tokenizer)
 
     ### adding columns needed for comparing against single label later
@@ -162,8 +166,6 @@ def bert_model_train(input_data, bert_type):
         callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
     )
 
-    model_path = f"../../models/bert_models/{model_type}/"
-
     # Train, evaluate, and save the model
     trainer.train()
 
@@ -184,15 +186,28 @@ def bert_model_train(input_data, bert_type):
     print("Evaluating Model:")
     evaluation = trainer.evaluate()
     print(evaluation)
-    print(f"Saving trained and evaluated model to: {model_path}")
-    trainer.save_model(model_path)
+    print(f"Saving trained and evaluated model to: {MODEL_PATH}/{bert_type}/")
+    trainer.save_model(f"{MODEL_PATH}/{bert_type}/")
 
-    thresholds_path = os.path.join(model_path, "best_thresholds.json")
+    thresholds_path = os.path.join(f"{MODEL_PATH}/{bert_type}/", "best_thresholds.json")
     with open(thresholds_path, "w") as f:
         json.dump(best_thresholds, f, indent=4)
 
 
+@app.command()
+def train(
+    input_data: str = typer.Argument(
+        ..., help="Path to the input data file (pickle format)"
+    ),
+    bert_type: str = typer.Argument(
+        ..., help="Type of BERT model ('BERT' or 'Bio_ClinicalBERT')"
+    ),
+):
+    """
+    Train a BERT model for drug overdose classification.
+    """
+    bert_model_train(input_data, bert_type)
+
+
 if __name__ == "__main__":
-    input_location = sys.argv[1]
-    model_type = sys.argv[2]
-    bert_model_train(input_location, model_type)
+    app()

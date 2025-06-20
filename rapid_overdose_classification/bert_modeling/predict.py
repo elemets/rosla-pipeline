@@ -1,7 +1,12 @@
+import typer
 import pandas as pd
-import sys
 from datasets import Dataset
-from constants import device, drug_cols
+from rapid_overdose_classification.bert_modeling.constants import (
+    device,
+    drug_cols,
+    MODEL_PATH,
+    REPORTS_OUTPUT_PATH,
+)
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -12,14 +17,16 @@ from datetime import datetime
 import json
 import time
 
+app = typer.Typer()
 
-def predict_bert(input_data, model_type, text_col):
+
+def predict_bert(input_data: str, model_type: str, text_col: str):
     """
     Predicts labels for a given dataset using a BERT model.
 
     Args:
         input_data (str): Path to the CSV file containing the input data.
-        model (str): Type of the BERT model to be used for prediction.
+        model_type (str): Type of the BERT model to be used for prediction.
         text_col (str): Name of the column containing text data in the input CSV file.
 
     Returns:
@@ -28,14 +35,14 @@ def predict_bert(input_data, model_type, text_col):
     # Load data to do the prediction on
     pred_df = pd.read_csv(input_data)
     texts = pred_df[text_col].tolist()
-    tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model_type}")
+    tokenizer = AutoTokenizer.from_pretrained(f"{MODEL_PATH}{model_type}")
 
     # Process texts in batches to avoid overflow
     all_probs = []
     batch_size = 8  # Adjust based on memory constraints
 
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../../models/bert_models/{model_type}",
+        f"{MODEL_PATH}{model_type}",
         num_labels=10,
         problem_type="multi_label_classification",
     ).to(device)
@@ -65,7 +72,7 @@ def predict_bert(input_data, model_type, text_col):
     y_pred_np = np.zeros_like(predicted_probabilities_np)
 
     # Fix the path to use the model parameter instead of model_type
-    thresholds_path = f"../../models/bert_models/{model_type}/best_thresholds.json"
+    thresholds_path = f"{MODEL_PATH}{model_type}/best_thresholds.json"
     with open(thresholds_path, "r") as f:
         best_thresholds = json.load(f)
 
@@ -83,17 +90,28 @@ def predict_bert(input_data, model_type, text_col):
     # Format the date and time for a filename
     filename_time = current_time.strftime("%Y%m%d_%H%M")
 
-    pred_df.to_csv(
-        f"../../reports/model_outputs/{model_type}_outputs_{filename_time}.csv"
-    )
+    pred_df.to_csv(f"{REPORTS_OUTPUT_PATH}{model_type}_outputs_{filename_time}.csv")
 
 
-if __name__ == "__main__":
-    input_data_loc = sys.argv[1]
-    text_col = sys.argv[2]
-    model_type = sys.argv[3]
+@app.command()
+def predict(
+    input_data: str = typer.Argument(
+        ..., help="Path to the CSV file containing the input data"
+    ),
+    text_col: str = typer.Argument(..., help="Name of the column containing text data"),
+    model_type: str = typer.Argument(
+        ..., help="Type of BERT model ('BERT' or 'Bio_ClinicalBERT')"
+    ),
+):
+    """
+    Generate predictions using a trained BERT model for drug overdose classification.
+    """
     start_time = time.time()
-    predict_bert(input_data_loc, model_type, text_col)
+    predict_bert(input_data, model_type, text_col)
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Total execution time: {elapsed_time:.2f} seconds")
+
+
+if __name__ == "__main__":
+    app()

@@ -7,8 +7,9 @@ from sklearn.metrics import (
     classification_report,
 )
 from transformers import EvalPrediction
-import os
-from constants import cols_needed, drug_cols, batch_size, lr, metric, wd
+from rapid_overdose_classification.bert_modeling.constants import (
+    drug_cols,
+)
 
 
 def multi_label_metrics(predictions, labels, threshold=0.5):
