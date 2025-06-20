@@ -1,3 +1,4 @@
+import typer
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -5,20 +6,32 @@ from transformers import (
 import torch
 import pandas as pd
 import numpy as np
-import sys
-from constants import drug_cols, device
+from rapid_overdose_classification.bert_modeling.constants import (
+    drug_cols,
+    MODEL_PATH,
+    EXPLAINABILITY_OUTPUT_PATH,
+)
+from rapid_overdose_classification.bert_modeling.config import device
 from transformers_interpret import MultiLabelClassificationExplainer
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import json
 
+app = typer.Typer()
 
-def save_explainability(explain_df, model_type):
 
+def save_explainability(explain_df: pd.DataFrame, model_type: str):
+    """
+    Generate explainability reports for BERT model predictions.
+
+    Args:
+        explain_df (pd.DataFrame): DataFrame containing text and labels to explain
+        model_type (str): Type of BERT model to use for explanation
+    """
     ### Loading the finetunedBERT model
-    tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model_type}")
+    tokenizer = AutoTokenizer.from_pretrained(f"{MODEL_PATH}{model_type}")
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../../models/bert_models/{model_type}",
+        f"{MODEL_PATH}{model_type}",
         num_labels=len(drug_cols),
         problem_type="multi_label_classification",
     ).to(device)
@@ -62,7 +75,7 @@ def save_explainability(explain_df, model_type):
 
     ### Defining the sigmoid curve and using this to
     ### Normalise the predicted outputs
-    thresholds_path = f"../../models/bert_models/{model_type}/best_thresholds.json"
+    thresholds_path = f"{MODEL_PATH}{model_type}/best_thresholds.json"
     with open(thresholds_path, "r") as f:
         best_thresholds = json.load(f)
 
@@ -94,21 +107,31 @@ def save_explainability(explain_df, model_type):
         return multiexplainer.visualize(filename, true_class=list(true_labels))
 
     word_attributions = multiexplainer(explain_df.loc[0]["text"])
-    print("Logging explainability htmls to logs/bioclinicalBERT_explainability/")
+    print(f"Logging explainability htmls to {EXPLAINABILITY_OUTPUT_PATH}")
     for index, row in explain_df.iterrows():
         interpret(
             explain_df.loc[index]["text"],
-            f"../../reports/bioclinicalBERT_explainability/{index}.html",
+            f"{EXPLAINABILITY_OUTPUT_PATH}{index}.html",
             true_labels=explain_df.loc[index]["true_labels"],
         )
     print("Done")
 
 
-if __name__ == "__main__":
-
-    file_to_explain = sys.argv[1]
-    model_type = sys.argv[2]
-
+@app.command()
+def explain(
+    file_to_explain: str = typer.Argument(
+        ..., help="Path to CSV file containing data to explain"
+    ),
+    model_type: str = typer.Argument(
+        ..., help="Type of BERT model ('BERT' or 'Bio_ClinicalBERT')"
+    ),
+):
+    """
+    Generate explainability reports for BERT model predictions on a given dataset.
+    """
     explain_file = pd.read_csv(file_to_explain)
-
     save_explainability(explain_file, model_type)
+
+
+if __name__ == "__main__":
+    app()

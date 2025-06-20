@@ -1,9 +1,25 @@
-import sys
+import typer
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from helpers import drug_cols
-from constants import device
+from rapid_overdose_classification.bert_modeling.constants import (
+    drug_cols,
+    device,
+    MODEL_PATH,
+    EVALUATION_RESULTS_PATH,
+    EVALUATION_MISMATCHES_PATH,
+    EVALUATION_METRICS_PATH,
+)
+from rapid_overdose_classification.bert_modeling.config import (
+    EVAL_BATCH_SIZE,
+    MAX_LENGTH,
+    BOOTSTRAP_METRICS,
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_NUM_RESAMPLES,
+    BOOTSTRAP_AVERAGE,
+    EXTERNAL_EXPERIMENT_NAME,
+    INTERNAL_EXPERIMENT_NAME,
+)
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sklearn.metrics import (
     f1_score,
@@ -15,14 +31,19 @@ from sklearn.metrics import (
 )
 import json
 from model_tuner.bootstrapper import evaluate_bootstrap_metrics
-import typer
 from tqdm import tqdm
 import numpy as np
 import mlflow
+from rapid_overdose_classification.config import mlflow_uri
+
+app = typer.Typer(help="Evaluation of BERT style models")
 
 
 def evaluate_bert_models(
-    input_data, model_type, external_dataset_or_test, batch_size=16
+    input_data: str,
+    model_type: str,
+    external_dataset_or_test: int,
+    batch_size: int = EVAL_BATCH_SIZE,
 ):
     """
     Evaluates BERT models on a given dataset with batching.
@@ -30,12 +51,12 @@ def evaluate_bert_models(
     Args:
         input_data (str): Path to the CSV or PKL file containing the evaluation data.
         model_type (str): Type of the BERT model to be used for evaluation.
+        external_dataset_or_test (int): Flag indicating if this is external dataset (1) or test set (0).
         batch_size (int): Batch size for processing.
 
     Returns:
         None
     """
-
     mlflow.set_tracking_uri(mlflow_uri)
 
     if input_data.endswith(".pkl"):
@@ -48,9 +69,9 @@ def evaluate_bert_models(
     texts = eval_df["text"].tolist()
     y_true = eval_df[drug_cols].values
 
-    tokenizer = AutoTokenizer.from_pretrained(f"../../models/bert_models/{model_type}")
+    tokenizer = AutoTokenizer.from_pretrained(f"{MODEL_PATH}{model_type}")
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../../models/bert_models/{model_type}",
+        f"{MODEL_PATH}{model_type}",
         num_labels=len(drug_cols),
         problem_type="multi_label_classification",
     ).to(device)
@@ -60,7 +81,7 @@ def evaluate_bert_models(
         texts,
         padding="max_length",
         truncation=True,
-        max_length=512,
+        max_length=MAX_LENGTH,
         return_tensors="pt",
     )
     dataset = TensorDataset(
@@ -88,7 +109,7 @@ def evaluate_bert_models(
 
     # Create an array for predictions
     y_pred_np = np.zeros_like(predicted_probabilities_np)
-    thresholds_path = f"../../models/bert_models/{model_type}/best_thresholds.json"
+    thresholds_path = f"{MODEL_PATH}{model_type}/best_thresholds.json"
     with open(thresholds_path, "r") as f:
         best_thresholds = json.load(f)
 
@@ -116,8 +137,8 @@ def evaluate_bert_models(
     print(f"Macro F1 Score: {f1}")
     print(f"Macro AUC ROC: {roc_auc}")
 
-    if int(external_dataset_or_test):
-        experiment_name = f"External Dataset"
+    if external_dataset_or_test:
+        experiment_name = EXTERNAL_EXPERIMENT_NAME
         mlflow.set_experiment(experiment_name)
         with mlflow.start_run(run_name=f"Finetuned model {model_type}") as parent_run:
             mlflow.log_metric("Hamming Loss", hamming)
@@ -129,10 +150,10 @@ def evaluate_bert_models(
             y=y_true_np,
             y_pred_prob=predicted_probabilities_np,
             thresholds=best_thresholds,
-            metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
-            n_samples=1000,
-            num_resamples=1000,
-            average="macro",
+            metrics=BOOTSTRAP_METRICS,
+            n_samples=BOOTSTRAP_N_SAMPLES,
+            num_resamples=BOOTSTRAP_NUM_RESAMPLES,
+            average=BOOTSTRAP_AVERAGE,
             balance=False,
         )
 
@@ -193,38 +214,28 @@ def evaluate_bert_models(
         print(metrics_df.round(4))
 
         mismatches_df = output_df[mismatch_mask].copy()
-
         mismatches_df = mismatches_df.sort_values("text")
 
-        output_df.to_csv(
-            "../../reports/evaluated_res_external_removedmislabels_n_model.csv"
-        )
-
-        mismatches_df.to_csv(
-            "../../reports/predicted_wrong_external_removedmislabels_n_model.csv"
-        )
-
-        metrics_df.to_csv(
-            "../../reports/eval_metric_external_removedmislabels_n_model.csv"
-        )
+        output_df.to_csv(EVALUATION_RESULTS_PATH)
+        mismatches_df.to_csv(EVALUATION_MISMATCHES_PATH)
+        metrics_df.to_csv(EVALUATION_METRICS_PATH)
 
     else:
-        experiment_name = f"Table 3 Results"
+        experiment_name = INTERNAL_EXPERIMENT_NAME
         mlflow.set_experiment(experiment_name)
         with mlflow.start_run(run_name=f"Finetuned model {model_type}") as parent_run:
             mlflow.log_metric("Hamming Loss", hamming)
             mlflow.log_metric("macro f1", f1)
-            # mlflow.log_metric("macro roc_auc", roc_auc)
             mlflow.log_metric("accuracy", accuracy)
 
             results = evaluate_bootstrap_metrics(
                 y=y_true_np,
                 y_pred_prob=predicted_probabilities_np,
                 thresholds=best_thresholds,
-                metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
-                n_samples=1000,
-                num_resamples=1000,
-                average="macro",
+                metrics=BOOTSTRAP_METRICS,
+                n_samples=BOOTSTRAP_N_SAMPLES,
+                num_resamples=BOOTSTRAP_NUM_RESAMPLES,
+                average=BOOTSTRAP_AVERAGE,
                 balance=False,
             )
 
@@ -242,24 +253,22 @@ def evaluate_bert_models(
                 )
 
 
-app = typer.Typer(help="Evaluation of bert style models")
-
-
 @app.command()
-def main(
+def evaluate(
     input_data: str = typer.Argument(
-        "../../data/test_set.csv",
-        help="input test data",
+        "../../data/test_set.csv", help="Path to input test data (CSV, PKL, or XLSX)"
     ),
     model_type: str = typer.Argument(
-        "bioclinicalbert", help="bert or bioclinicalbert model types"
+        "bioclinicalbert", help="BERT model type ('BERT' or 'Bio_ClinicalBERT')"
     ),
     external_dataset: int = typer.Argument(
-        0, help="specify whether it's internal or external dataset"
+        0, help="0 for internal test set, 1 for external dataset"
     ),
-    batch_size: int = typer.Argument(16, help="Batch size for evaluating dataset"),
+    batch_size: int = typer.Argument(EVAL_BATCH_SIZE, help="Batch size for evaluation"),
 ):
-
+    """
+    Evaluate BERT models on test datasets with comprehensive metrics and MLflow logging.
+    """
     evaluate_bert_models(input_data, model_type, external_dataset, batch_size)
 
 
