@@ -114,11 +114,11 @@ def combine_embedding_files():
         pd.DataFrame: Combined dataframe with all embeddings and outcomes.
     """
     print("Loading embedding files...")
-    cui = pd.read_pickle("../data/outcomes_squashed/outcomes_squashed_cui.pkl")
+    cui = pd.read_pickle("../data/processed_data/processed_data_cui.pkl")
     bioclin = pd.read_pickle(
-        "../data/outcomes_squashed/outcomes_squashed_bioclinicalbert.pkl"
+        "../data/processed_data/processed_data_bioclinicalbert.pkl"
     )
-    glove = pd.read_pickle("../data/outcomes_squashed/outcomes_squashed_glove.pkl")
+    glove = pd.read_pickle("../data/processed_data/processed_data_glove.pkl")
 
     print("Combining embeddings...")
     combined_df = pd.DataFrame()
@@ -144,14 +144,14 @@ def process(
         "../data/different_embeddings/", help="Directory containing input files"
     ),
     output_dir: str = typer.Option(
-        "../data/outcomes_squashed/", help="Directory to save output files"
+        "../data/processed_data/", help="Directory to save output files"
     ),
 ):
     """
     Process a single embedding file by preprocessing outcome columns.
     """
     input_path = f"{input_dir}{input_file}"
-    output_path = f"{output_dir}outcomes_squashed_{embedding_type}.pkl"
+    output_path = f"{output_dir}processed_data_{embedding_type}.pkl"
 
     print(f"Loading data from: {input_path}")
     try:
@@ -176,11 +176,11 @@ def process(
 @app.command()
 def combine(
     input_dir: str = typer.Option(
-        "../data/outcomes_squashed/",
+        "../data/processed_data/",
         help="Directory containing embedding files to combine",
     ),
     output_dir: str = typer.Option(
-        "../data/outcomes_squashed/", help="Directory to save combined file"
+        "../data/processed_data/", help="Directory to save combined file"
     ),
     output_filename: str = typer.Option(
         "combined_data.pkl", help="Name of the output combined file"

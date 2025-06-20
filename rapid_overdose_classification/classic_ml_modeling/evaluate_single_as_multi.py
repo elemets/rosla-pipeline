@@ -1,7 +1,6 @@
 from model_tuner import loadObjects
 from model_tuner.bootstrapper import evaluate_bootstrap_metrics
 import os
-import sys
 import pandas as pd
 import numpy as np
 from sklearn.metrics import (
@@ -13,15 +12,24 @@ from sklearn.metrics import (
 )
 import mlflow
 import typer
-from rapid_overdose_classification.constants import drug_cols
-from rapid_overdose_classification.config import mlflow_uri
+from rapid_overdose_classification.constants import (
+    drug_cols,
+    TEST_SET_PATH,
+    EMBEDDING_TYPES,
+    MODEL_PATH_TEMPLATE,
+)
+from rapid_overdose_classification.config import (
+    MLFLOW_URI,
+    BOOTSTRAP_NUM_RESAMPLES,
+    BOOTSTRAP_NUM_SAMPLES,
+    MULTI_LABEL_BOOTSTRAP_METRICS,
+    MODEL_SCORING_METRIC,
+)
 
 
 def load_models_for_outcome(embedding_type):
 
-    embedding_type_path = (
-        f"../../models/classic_ml_models/single_label/{embedding_type}/"
-    )
+    embedding_type_path = MODEL_PATH_TEMPLATE.format(embedding_type=embedding_type)
 
     # Dictionary to store the models
     models_dict = {}
@@ -85,7 +93,7 @@ def predict_all_models(X_column, models_dict):
 
 
 def evaluate_classic_models(embedder: str, text_input: str):
-    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_tracking_uri(MLFLOW_URI)
 
     model_dict = load_models_for_outcome(embedder)
 
@@ -151,16 +159,17 @@ def evaluate_classic_models(embedder: str, text_input: str):
         mlflow.log_metric("accuracy", accuracy)
 
         best_thresholds = [
-            model_dict[col].threshold["roc_auc"] for col in probabilities_df.columns
+            model_dict[col].threshold[MODEL_SCORING_METRIC]
+            for col in probabilities_df.columns
         ]
 
         results = evaluate_bootstrap_metrics(
             y=true_values,
             y_pred_prob=probability_values,
             thresholds=best_thresholds,
-            metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
-            n_samples=1000,
-            num_resamples=1000,
+            metrics=MULTI_LABEL_BOOTSTRAP_METRICS,
+            n_samples=BOOTSTRAP_NUM_SAMPLES,
+            num_resamples=BOOTSTRAP_NUM_RESAMPLES,
             average="macro",
             balance=False,
         )
@@ -187,12 +196,14 @@ app = typer.Typer(
 @app.command()
 def main(
     embedder: str = typer.Argument(
-        "bioclinicalbert", help="Embedding type (bioclinicalbert, cuis, glove)"
+        "bioclinicalbert", help=f"Embedding type ({', '.join(EMBEDDING_TYPES)})"
     ),
     text_input: str = typer.Argument(
-        "../../data/test_set.pkl", help="Path to the input text data file"
+        TEST_SET_PATH, help="Path to the input text data file"
     ),
 ):
+    if embedder not in EMBEDDING_TYPES:
+        raise ValueError(f"Embedder must be one of {EMBEDDING_TYPES}")
     evaluate_classic_models(embedder, text_input)
 
 

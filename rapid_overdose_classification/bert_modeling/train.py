@@ -84,7 +84,7 @@ def bert_model_train(input_data, bert_type):
         bert_id = "emilyalsentzer/Bio_ClinicalBERT"
 
     tokenizer = AutoTokenizer.from_pretrained(bert_id)
-    drug_data = pd.read_pickle(f"../../data/outcomes_squashed/{input_data}")
+    drug_data = pd.read_pickle(f"../../data/processed_data/{input_data}")
     tokenFunc = TokenizeFunc(tokenizer)
 
     ### adding columns needed for comparing against single label later

@@ -1,3 +1,21 @@
+"""Evaluating single as multi constants"""
+
+TEST_SET_PATH = "../../data/test_set.pkl"
+EMBEDDING_TYPES = ["bioclinicalbert", "cuis", "glove"]
+MODEL_PATH_TEMPLATE = "../../models/classic_ml_models/single_label/{embedding_type}/"
+
+
+"""Training constants"""
+
+PROCESSED_DATA_TFIDF_DIR = "../../data/processed_data/PROCESSED_DATA_tfidf.pkl"
+PROCESSED_DATA_GLOVE_DIR = "../../data/processed_data/PROCESSED_DATA_glove.pkl"
+PROCESSED_DATA_CUI_DIR = "../../data/processed_data/PROCESSED_DATA_cui.pkl"
+PROCESSED_DATA_BIOCLINICALBERT_DIR = (
+    "../../data/processed_data/PROCESSED_DATA_bioclinicalbert.pkl"
+)
+COMBINED_DATA_DIR = "../../data/processed_data/combined_data.pkl"
+MULTI_LABEL_MODEL_TYPES = ["RandomForest", "XGBoost"]
+
 model_list = [
     "Logistic Regression",
     "Random Forest",

@@ -1,4 +1,7 @@
-from rapid_overdose_classification.constants import model_list
+from rapid_overdose_classification.constants import (
+    model_list,
+    PROCESSED_DATA_GLOVE_DIR,
+)
 import pandas as pd
 import numpy as np
 import mlflow
@@ -7,14 +10,25 @@ from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 from model_tuner import Model, dumpObjects
 import sklearnex
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier
 from sklearn.base import clone
-from NaiveSVC import NaivelyCalibratedLinearSVC
-from rapid_overdose_classification.config import mlflow_uri
-import sys
 from tqdm import tqdm
+from rapid_overdose_classification.config import (
+    MLFLOW_URI,
+    BOOTSTRAP_METRICS,
+    model_parameters,
+    N_ITER,
+    N_SPLITS,
+    RANDOM_GRID,
+    RANDOM_STATE,
+    STRATIFY_Y,
+    BOOTSTRAP_NUM_RESAMPLES,
+    BOOTSTRAP_NUM_SAMPLES,
+    MODEL_SCORING_METRIC,
+    KFOLD,
+    OPTIMAL_THRESH,
+)
+from xgboost import XGBClassifier
+import typer
 
 
 def glove_single_label(drug):
@@ -23,103 +37,67 @@ def glove_single_label(drug):
     drug_df['GloVE_proc'] contains the glove embeddings.
     These will be logged to a different location on MLFlow.
     """
+    sklearnex.patch_sklearn()
+
     experiment_name = f"GloVe Embeddings Bootstrapped"
-    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_tracking_uri(MLFLOW_URI)
     mlflow.set_experiment(experiment_name)
+
+    drug_df = pd.read_pickle(PROCESSED_DATA_GLOVE_DIR)
 
     with mlflow.start_run(run_name=f"{drug}") as parent_run:
 
         best_average_precision = 0
         best_model = 0
 
-        ### this patch helps to speed up sklearn in general
-        ### but especially SVC which is veeeery slow due
-        ### to using the probabiltiy=True (which is needed to generate roc_auc etc.)
-        sklearnex.patch_sklearn()
-        drug_df = pd.read_pickle(
-            "../../data/outcomes_squashed/outcomes_squashed_glove.pkl"
-        )
-
         for model_name in tqdm(model_list):
             with mlflow.start_run(run_name=f"{model_name}", nested=True) as child_run:
-
-                if model_name == "Random Forest":
-                    estimator = RandomForestClassifier(class_weight="balanced")
-
-                    estimator_name = "rf"
-
-                    tuned_parameters = {
-                        f"{estimator_name}__max_depth": [3, 5, 10, None],
-                        f"{estimator_name}__n_estimators": [10, 100, 200],
-                        f"{estimator_name}__max_features": [1, 3, 5, 7],
-                        f"{estimator_name}__min_samples_leaf": [1, 2, 3],
-                    }
-                elif model_name == "Logistic Regression":
-
-                    estimator = LogisticRegression(
-                        class_weight="balanced", C=1, max_iter=1000
-                    )
-
-                    estimator_name = "lg"
-                    # Set the parameters by cross-validation
-                    tuned_parameters = [{estimator_name + "__C": np.logspace(-4, 0, 3)}]
-                elif model_name == "XGBoost":
-
-                    estimator = XGBClassifier(
-                        objective="binary:logistic",
-                    )
-
-                    estimator_name = "xgb"
-
-                    tuned_parameters = {
-                        f"{estimator_name}__max_depth": [3, 5, 10],
-                        f"{estimator_name}__learning_rate": [0.03, 0.003],
-                        f"{estimator_name}__n_estimators": [50, 10, 100],
-                        f"{estimator_name}__n_jobs": [-2],
-                    }
-                elif model_name == "SVM":
-
-                    estimator = NaivelyCalibratedLinearSVC(class_weight="balanced")
-                    estimator_name = "svm"
-
-                    tuned_parameters = {
-                        f"{estimator_name}__tol": [0.0001, 0.03, 0.003],
-                        f"{estimator_name}__C": [1, 0.05, 0.5, 0.1],
-                    }
 
                 y = drug_df[drug].values
                 X = drug_df["GloVE_proc"].values
                 X = np.stack(X, axis=0)
                 X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=0.2, random_state=42
+                    X, y, test_size=0.2, random_state=RANDOM_STATE
                 )
-                kfold = True
-                calibrate = False
+
+                # Special handling for XGBoost scale_pos_weight
+                if model_name == "XGBoost":
+                    positive_count = np.sum(y)
+                    negative_count = len(y) - positive_count
+                    scale_pos_weight = negative_count / positive_count
+
+                    estimator = XGBClassifier(
+                        objective="binary:logistic", scale_pos_weight=scale_pos_weight
+                    )
+
+                else:
+                    estimator = clone(model_parameters[model_name]["estimator"])
 
                 model = Model(
                     name=f"{model_name}",
-                    estimator_name=estimator_name,
+                    estimator_name=model_parameters[model_name]["estimator_name"],
                     model_type="classification",
-                    calibrate=calibrate,
+                    calibrate=False,
                     estimator=clone(estimator),
-                    kfold=kfold,
-                    stratify_y=True,
-                    grid=tuned_parameters,
-                    randomized_grid=True,
-                    n_iter=10,
-                    scoring=["roc_auc"],
-                    n_splits=10,
+                    kfold=KFOLD,
+                    stratify_y=STRATIFY_Y,
+                    grid=model_parameters[model_name]["tuned_parameters"],
+                    randomized_grid=RANDOM_GRID,
+                    n_iter=N_ITER,
+                    scoring=[MODEL_SCORING_METRIC],
+                    boost_early=model_parameters[model_name]["xgbearly"],
+                    n_splits=N_SPLITS,
                     n_jobs=-2,
-                    random_state=42,
+                    random_state=RANDOM_STATE,
                 )
 
                 print(f"Tuning hyperparameters for: {drug}")
 
-                model.grid_search_param_tuning(X_train, y_train, f1_beta_tune=True)
-
-                model.fit(X_train, y_train, score="roc_auc")
-
-                model.return_metrics(X_train, y_train, optimal_threshold=True)
+                model.grid_search_param_tuning(
+                    X_train, y_train, f1_beta_tune=OPTIMAL_THRESH
+                )
+                model.fit(X_train, y_train, score=MODEL_SCORING_METRIC)
+                model.return_metrics(X_train, y_train, optimal_threshold=OPTIMAL_THRESH)
 
                 ### Logging the validation results to MLFflow
                 classreport = model.classification_report
@@ -144,11 +122,11 @@ def glove_single_label(drug):
                 bootstrap_metrics = model.return_bootstrap_metrics(
                     X_test,
                     y_test,
-                    ["f1_macro", "roc_auc", "average_precision"],
-                    num_resamples=1000,
-                    n_samples=1000,
-                    threshold=model.threshold["roc_auc"],
-                    balance=True,
+                    BOOTSTRAP_METRICS,
+                    num_resamples=BOOTSTRAP_NUM_RESAMPLES,
+                    n_samples=BOOTSTRAP_NUM_SAMPLES,
+                    threshold=model.threshold[MODEL_SCORING_METRIC],
+                    balance=False,
                 )
                 bootstrap_metrics_dict = bootstrap_metrics.to_dict(orient="records")
 
@@ -163,7 +141,7 @@ def glove_single_label(drug):
                         metric["95% CI Upper"],
                     )
 
-                y_pred = model.predict(X_test, optimal_threshold=True)
+                y_pred = model.predict(X_test, optimal_threshold=OPTIMAL_THRESH)
 
                 ### Saving the confusion matrix as a plot and then logging that plot
                 ### as an artifact in MLFlow
@@ -190,6 +168,13 @@ def glove_single_label(drug):
             )
 
 
-if __name__ == "__main__":
-    drug = sys.argv[1]
+app = typer.Typer()
+
+
+@app.command()
+def main(drug: str = typer.Argument(help="Drug name to train models for")):
     glove_single_label(drug)
+
+
+if __name__ == "__main__":
+    app()

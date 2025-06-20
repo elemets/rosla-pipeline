@@ -8,19 +8,28 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay,
     roc_auc_score,
 )
-import sys
 from model_tuner import Model, train_val_test_split
 from model_tuner.pickleObjects import dumpObjects
-from rapid_overdose_classification.constants import all_drug_cols
+from rapid_overdose_classification.constants import (
+    all_drug_cols,
+    COMBINED_DATA_DIR,
+    MULTI_LABEL_MODEL_TYPES,
+)
 from sklearn.metrics import hamming_loss, make_scorer
-from xgboost import XGBClassifier
-from sklearn.multioutput import MultiOutputClassifier
 from sklearnex import patch_sklearn
 from sklearn.metrics import multilabel_confusion_matrix
-from sklearn.ensemble import RandomForestClassifier
 from model_tuner.bootstrapper import evaluate_bootstrap_metrics
 import typer
-from rapid_overdose_classification.config import mlflow_uri
+from rapid_overdose_classification.config import (
+    MLFLOW_URI,
+    BOOTSTRAP_NUM_RESAMPLES,
+    BOOTSTRAP_NUM_SAMPLES,
+    RANDOM_STATE,
+    RANDOM_GRID,
+    multi_label_model_parameters,
+    MULTI_LABEL_BOOTSTRAP_METRICS,
+    MULTI_LABEL_N_ITER,
+)
 
 
 def multi_label_classifier(model_type):
@@ -32,44 +41,15 @@ def multi_label_classifier(model_type):
         model_type (str): type of multi label classifier to train, either RandomForest
         or XGBoost.
     """
+    if model_type not in MULTI_LABEL_MODEL_TYPES:
+        raise ValueError(f"Model type must be one of {MULTI_LABEL_MODEL_TYPES}")
 
     patch_sklearn()
-    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_tracking_uri(MLFLOW_URI)
     experiment_name = f"Multi Label"
     mlflow.set_experiment(experiment_name)
 
-    if model_type == "XGBoost":
-        estimator = XGBClassifier()
-        early_boost = False
-
-        estimator_name = "xgb"
-        ### need to do this because we have to nest it in  a mutlioutputclassifier
-        tuned_parameters = {
-            f"{estimator_name}__estimator__max_depth": [3, 5, 10],
-            f"{estimator_name}__estimator__learning_rate": [0.03, 0.003],
-            f"{estimator_name}__estimator__n_estimators": [50, 10, 100],
-            f"{estimator_name}__estimator__n_jobs": [-2],
-            f"{estimator_name}__estimator__device": ["cuda"],
-        }
-
-        estimator = MultiOutputClassifier(estimator)
-    elif model_type == "RandomForest":
-        rf = RandomForestClassifier(class_weight="balanced")
-        early_boost = False
-        estimator_name = "rf"
-
-        tuned_parameters = {
-            f"{estimator_name}__estimator__max_depth": [3, 5, 10, None],
-            f"{estimator_name}__estimator__n_estimators": [10, 100, 200],
-            f"{estimator_name}__estimator__max_features": [1, 3, 5, 7],
-            f"{estimator_name}__estimator__min_samples_leaf": [1, 2, 3],
-        }
-
-        estimator = MultiOutputClassifier(rf)
-    else:
-        raise ("Need to specify a model type out of RandomForest and XGBoost")
-
-    drug_df = pd.read_pickle("../../data/outcomes_squashed/combined_data.pkl")
+    drug_df = pd.read_pickle(COMBINED_DATA_DIR)
     hamming = make_scorer(hamming_loss, greater_is_better=False)
 
     y = drug_df[all_drug_cols].values
@@ -77,26 +57,27 @@ def multi_label_classifier(model_type):
     X = np.stack(X, axis=0)
     _, _, n_features = X.shape
     X = X.reshape(-1, n_features)
+
     with mlflow.start_run(run_name=model_type):
 
         model = Model(
             name=model_type,
             model_type="classification",
-            estimator_name=estimator_name,
+            estimator_name=multi_label_model_parameters[model_type]["estimator_name"],
             multi_label=True,
             class_labels=all_drug_cols,
             custom_scorer={"hamming_loss": hamming},
             calibrate=False,
-            estimator=estimator,
+            estimator=multi_label_model_parameters[model_type]["estimator"],
             kfold=False,
             stratify_y=False,
-            grid=tuned_parameters,
-            randomized_grid=True,
-            boost_early=early_boost,
-            n_iter=3,
+            grid=multi_label_model_parameters[model_type]["tuned_parameters"],
+            randomized_grid=RANDOM_GRID,
+            boost_early=multi_label_model_parameters[model_type]["xgbearly"],
+            n_iter=MULTI_LABEL_N_ITER,
             scoring=["hamming_loss"],
             n_jobs=-2,
-            random_state=42,
+            random_state=RANDOM_STATE,
         )
 
         print(f"Tuning hyperparameters for all drugs:")
@@ -106,7 +87,7 @@ def multi_label_classifier(model_type):
             X,
             y,
             stratify_y=False,
-            random_state=42,
+            random_state=RANDOM_STATE,
             train_size=model.train_size,
             validation_size=model.validation_size,
             test_size=model.test_size,
@@ -115,7 +96,7 @@ def multi_label_classifier(model_type):
         model.kfold = False
 
         y_prob = model.predict_proba(X_test)
-        # Reshaping and extarcting just the predicted positive class
+        # Reshaping and extracting just the predicted positive class
         # for y_prob
         y_prob = np.array([label_probs[:, 1] for label_probs in y_prob]).T
         ### F1 Weighted
@@ -130,6 +111,7 @@ def multi_label_classifier(model_type):
 
         hamming_l = hamming_loss(y_test, y_pred)
         roc_auc = roc_auc_score(y_test, y_prob, average="macro")
+
         for index, cm in enumerate(conf_valid):
             print(cm)
             cm_valid = ConfusionMatrixDisplay(cm)
@@ -167,9 +149,9 @@ def multi_label_classifier(model_type):
             y=y_test,
             y_pred_prob=y_prob,
             thresholds=best_thresholds,
-            metrics=["roc_auc", "accuracy", "hamming_loss", "f1_macro"],
-            n_samples=1000,
-            num_resamples=1000,
+            metrics=MULTI_LABEL_BOOTSTRAP_METRICS,
+            n_samples=BOOTSTRAP_NUM_SAMPLES,
+            num_resamples=BOOTSTRAP_NUM_RESAMPLES,
             average="macro",
             balance=False,
         )
