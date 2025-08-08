@@ -3,6 +3,10 @@ import pandas as pd
 import re
 from collections import Counter
 from typing import List, Dict, Tuple, Optional
+import typer
+
+
+app = typer.Typer()
 
 
 def analyze_pdf_format(pdf_path: str, sample_pages: int = 100) -> Dict:
@@ -785,9 +789,17 @@ def clean_final_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# Main execution
-if __name__ == "__main__":
-    pdf_path = "./pipeline_steps/input_files/raw/NewDMEC.pdf"
+@app.command()
+def main(
+    pdf_path: str = typer.Argument(
+        "./pipeline_steps/input_files/raw/NewDMEC.pdf",
+        help="Path to the input PDF file",
+    ),
+    output_csv: str = typer.Argument(
+        "./pipeline_steps/input_files/converted/coroner_data_complete.csv",
+        help="Path to the output CSV file",
+    ),
+):
 
     # Step 1: Analyze format
     print("Analyzing PDF format...")
@@ -817,13 +829,12 @@ if __name__ == "__main__":
         df = clean_final_dataframe(df)
 
         # Save
-        output_path = "coroner_data_complete.csv"
-        df.to_csv(output_path, index=False)
+        df.to_csv(output_csv, index=False)
 
         print(f"\nExtraction complete!")
         print(f"  Total cases: {len(df)}")
         print(f"  Columns: {list(df.columns)}")
-        print(f"  Saved to: {output_path}")
+        print(f"  Saved to: {output_csv}")
 
         # Show sample
         print("\nFirst 5 rows:")
@@ -838,3 +849,8 @@ if __name__ == "__main__":
             print(f"  {col}: {non_null}/{len(df)} ({pct:.1f}% complete)")
     else:
         print("\nNo data extracted. Check the debug output above.")
+
+
+# Main execution
+if __name__ == "__main__":
+    app()
