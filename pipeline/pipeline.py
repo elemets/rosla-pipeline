@@ -16,7 +16,7 @@ CONVERTEDDIR = "./pipeline_steps/input_files/converted/"
 CLASSIFIEDDIR = "./pipeline_steps/input_files/classified/"
 OUTPUTDIR = "./pipeline_steps/input_files"
 LOGFILE = "./pipeline_steps/logs/pipeline_summary.txt"
-MODEL_NAME = "bioclinicalbert"
+MODEL_NAME = "bert_models/bioclinicalbert"
 
 
 import os
@@ -332,10 +332,10 @@ def join_similar_columns_for_file(input_file, output_file=None):
         ],
         "EventCity": ["EventCity", "EventCityDesc"],
         "Mode": ["Mode", "Mode.1"],
-        "CauseA": ["CauseA", "Cause A"],
-        "CauseB": ["CauseB", "Cause B"],
-        "CauseC": ["CauseC", "Cause C"],
-        "CauseD": ["CauseD", "Cause D"],
+        "CauseA": ["CauseA", "Cause A", "DeathCauseA"],
+        "CauseB": ["CauseB", "Cause B", "DeathCauseB"],
+        "CauseC": ["CauseC", "Cause C", "DeathCauseC"],
+        "CauseD": ["CauseD", "Cause D", "DeathCauseD"],
         "CauseOther": ["CauseOther", "Other Cause", "OtherCause"],
         "HowInjuryOccurred": ["HowInjuryOccurred", "InjuryDesc", "HowInjuryOccu\nrred"],
         "FirstName": ["First Name"],

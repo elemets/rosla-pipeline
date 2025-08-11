@@ -796,7 +796,7 @@ def main(
         help="Path to the input PDF file",
     ),
     output_csv: str = typer.Argument(
-        "./pipeline_steps/input_files/converted/coroner_data_complete.csv",
+        "./pipeline_steps/input_files/converted/coroner_data_completedmec2.csv",
         help="Path to the output CSV file",
     ),
 ):
@@ -827,6 +827,16 @@ def main(
 
         # Step 4: Final cleanup
         df = clean_final_dataframe(df)
+
+        df.rename(
+            columns={
+                "DeathCauseA": "CauseA",
+                "DeathCauseB": "CauseB",
+                "DeathCauseC": "CauseC",
+                "DeathCauseD": "CauseD",
+            },
+            inplace=True,
+        )
 
         # Save
         df.to_csv(output_csv, index=False)
