@@ -83,6 +83,7 @@ def joining_similar_columns(dataframe):
             "address.death",
             "DeathAdress.1",
         ],
+        "Race": ['Races', "race", "Race"],
         "DeathZip": ["DeathZip", "DeathZip.1"],
         "EventPlace": ["EventPlace", "Event Place"],
         "EventAddress": ["EventAddr", "EventAddr.1", "eventaddress", "Event Address"],
