@@ -8,7 +8,43 @@ import typer
 
 app = typer.Typer()
 
+def detect_schema_type(page_text: str) -> Optional[int]:
+    """
+    Detects the schema type of a page based on its header keywords.
+    """
+    if not page_text:
+        return None
 
+    lines = page_text.strip().split("\n")
+    header_text = " ".join(lines[:5]).lower()
+
+    # Check for the most specific/defining keywords for each schema
+    # The new PDF seems to combine schemas, so we assign a primary type.
+
+    if "deathcauseb" in header_text and "deathcausec" in header_text and "deathcaused" in header_text:
+        # Page Group: Cause B, C, D
+        return 4
+    if "injurydesc" in header_text and "mode" in header_text and "deathcausea" in header_text:
+        # Page Group: Injury, Mode, Cause A
+        return 2
+    if "races" in header_text and "gender" in header_text and "age" in header_text:
+        # Page Group: Demographics
+        return 6
+    if "othercause" in header_text:
+        # Page Group: Other Cause
+        return 5
+    if "deathcity" in header_text and "eventplace" in header_text:
+        # Page Group: Locations
+        return 1
+    if "firstname" in header_text and "lastname" in header_text and "deathdate" in header_text:
+        # Page Group: Name, Date, Place
+        return 0
+    
+    # Fallback for original schema pages (less likely)
+    if "deathcausea" in header_text and "deathcauseb" in header_text:
+        return 3
+
+    return None  # Unidentified
 def analyze_pdf_format(pdf_path: str, sample_pages: int = 100) -> Dict:
     """
     Analyze PDF format to understand variations and patterns.
@@ -71,6 +107,7 @@ def analyze_pdf_format(pdf_path: str, sample_pages: int = 100) -> Dict:
 def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
     """
     Simple extraction that tries multiple methods and falls back gracefully.
+    MODIFIED: This version detects schema from page content, not page number.
     """
     all_records = []
     extraction_stats = {
@@ -78,12 +115,25 @@ def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
         "text_parse_success": 0,
         "failed_pages": [],
         "partial_pages": [],
+        "unidentified_schema_pages": [],
     }
 
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages):
             page_idx = page_num + 1
-            schema_type = page_num % 7
+
+            # --- START MODIFICATION ---
+            text = page.extract_text()
+            if not text or len(text.strip()) < 10:
+                extraction_stats["failed_pages"].append(page_idx)
+                continue
+
+            schema_type = detect_schema_type(text)
+
+            if schema_type is None:
+                extraction_stats["unidentified_schema_pages"].append(page_idx)
+                continue
+            # --- END MODIFICATION ---
 
             # Method 1: Try table extraction
             try:
@@ -99,7 +149,6 @@ def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
 
             # Method 2: Try structured text parsing
             try:
-                text = page.extract_text()
                 if text:
                     records = extract_from_text_flexible(text, schema_type, page_idx)
                     if records:
@@ -107,11 +156,9 @@ def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
                         extraction_stats["text_parse_success"] += 1
                     else:
                         extraction_stats["partial_pages"].append(page_idx)
-                else:
-                    extraction_stats["failed_pages"].append(page_idx)
             except Exception as e:
                 extraction_stats["failed_pages"].append(page_idx)
-                print(f"Error on page {page_idx}: {str(e)}")
+                print(f"Error on page {page_idx} (Schema {schema_type}): {str(e)}")
 
     # Print statistics
     print(f"\nExtraction Statistics:")
@@ -119,21 +166,18 @@ def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
     print(f"  Text parsing success: {extraction_stats['text_parse_success']} pages")
     print(f"  Failed pages: {len(extraction_stats['failed_pages'])}")
     print(f"  Partial extraction: {len(extraction_stats['partial_pages'])}")
+    print(f"  Unidentified schema: {len(extraction_stats['unidentified_schema_pages'])}")
 
-    if extraction_stats["failed_pages"][:10]:
-        print(f"  First 10 failed pages: {extraction_stats['failed_pages'][:10]}")
+    if extraction_stats["unidentified_schema_pages"][:10]:
+        print(f"  First 10 unidentified pages: {extraction_stats['unidentified_schema_pages'][:10]}")
 
     # Convert to DataFrame
     if all_records:
         df = pd.DataFrame(all_records)
-
-        # Group by CaseNum and merge
         df = merge_by_case_number(df)
-
         return df
 
     return pd.DataFrame()
-
 
 def extract_from_table(table: List[List], schema_type: int) -> List[Dict]:
     """Extract records from a table structure."""
@@ -278,7 +322,6 @@ def merge_by_case_number(df: pd.DataFrame) -> pd.DataFrame:
 
     return final_df
 
-
 def post_process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Post-process the raw extracted data to parse into proper columns.
@@ -301,9 +344,9 @@ def post_process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
             "EventCity",
             "EventZip",
         ],
-        2: ["InjuryDesc", "Mode"],
-        3: ["DeathCauseA", "DeathCauseB"],
-        4: ["DeathCauseC", "DeathCauseD"],
+        2: ["InjuryDesc", "Mode", "DeathCauseA"], # MODIFIED: Added CauseA
+        3: ["DeathCauseB"], # MODIFIED: Was CauseA, CauseB
+        4: ["DeathCauseC", "DeathCauseD"], # Now handled by schema 4 parser
         5: ["OtherCause"],
         6: ["Races", "Gender", "Age"],
     }
@@ -313,24 +356,27 @@ def post_process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         data_col = f"Schema{schema_type}_Data"
 
         if data_col in df.columns:
-            # Parse this schema's data
+            # Initialize columns
             for col in columns:
-                df[col] = "NULL"  # Initialize
+                if col not in df.columns: # Only init if not already present (like CauseA from schema 2)
+                    df[col] = "NULL"
 
             # Custom parsing for each schema type
-            if schema_type == 0:  # Page 1
+            if schema_type == 0:
                 df = parse_schema0_data(df, data_col)
-            elif schema_type == 1:  # Page 2
+            elif schema_type == 1:
                 df = parse_schema1_data(df, data_col)
-            elif schema_type == 2:  # Page 3
+            elif schema_type == 2: # This parser now handles CauseA
                 df = parse_schema2_data(df, data_col)
-            elif schema_type == 3:  # Page 4
+            elif schema_type == 3:
+                # This schema is now likely unused by the detector
+                # but if it *is* found, run the original parser
                 df = parse_schema3_data(df, data_col)
-            elif schema_type == 4:  # Page 5
+            elif schema_type == 4: # This parser now handles B, C, and D
                 df = parse_schema4_data(df, data_col)
-            elif schema_type == 5:  # Page 6
+            elif schema_type == 5:
                 df = parse_schema5_data(df, data_col)
-            elif schema_type == 6:  # Page 7
+            elif schema_type == 6:
                 df = parse_schema6_data(df, data_col)
 
     return df
@@ -468,57 +514,52 @@ def parse_schema1_data(df: pd.DataFrame, data_col: str) -> pd.DataFrame:
 
 
 def parse_schema2_data(df: pd.DataFrame, data_col: str) -> pd.DataFrame:
-    """Parse schema 2 (page 3) data - Injury Description and Mode."""
+    """Parse schema 2 (page 3) data - Injury, Mode, AND CauseA."""
     for idx, row in df.iterrows():
         data = row[data_col]
         if pd.isna(data) or not data:
             continue
 
-        # Modes of death
-        modes = [
-            "ACCIDENT",
-            "NATURAL",
-            "SUICIDE",
-            "HOMICIDE",
-            "UNDETERMINED",
-            "PENDING",
-        ]
-
-        # Find mode in text (usually at the end)
+        modes = ["ACCIDENT", "NATURAL", "SUICIDE", "HOMICIDE", "UNDETERMINED", "PENDING"]
         mode_found = None
         mode_pos = -1
+        data_upper = data.upper()
 
         for mode in modes:
-            # Use rfind to get last occurrence
-            pos = data.upper().rfind(mode)
+            pos = data_upper.rfind(mode)
             if pos != -1:
-                mode_found = mode
-                mode_pos = pos
-                break
-
+                # Ensure it's a whole word
+                if (pos == 0 or not data_upper[pos-1].isalnum()) and \
+                   (pos + len(mode) == len(data_upper) or not data_upper[pos + len(mode)].isalnum()):
+                    mode_found = mode
+                    mode_pos = pos
+                    break
+        
         if mode_found:
             df.at[idx, "Mode"] = mode_found
+            
             # Everything before mode is injury description
             injury_text = data[:mode_pos].strip()
-            if injury_text:
-                df.at[idx, "InjuryDesc"] = injury_text
-            else:
-                df.at[idx, "InjuryDesc"] = "NULL"
+            df.at[idx, "InjuryDesc"] = injury_text if injury_text else "NULL"
+            
+            # Everything after mode is DeathCauseA
+            cause_a_text = data[mode_pos + len(mode_found):].strip()
+            df.at[idx, "DeathCauseA"] = cause_a_text if cause_a_text else "NULL"
+            
         else:
-            # No mode found
+            # No mode found, logic from before
             if "NULL" in data.upper():
-                # Split by NULL
                 parts = data.upper().split("NULL")
                 if parts[0].strip():
                     df.at[idx, "InjuryDesc"] = data[: len(parts[0])].strip()
-                df.at[idx, "Mode"] = "NATURAL"  # Default mode
+                df.at[idx, "Mode"] = "NATURAL"
             else:
-                # Entire text is probably injury description
                 df.at[idx, "InjuryDesc"] = data
-                df.at[idx, "Mode"] = "NATURAL"  # Default mode
+                df.at[idx, "Mode"] = "NATURAL"
+            
+            df.at[idx, "DeathCauseA"] = "NULL" # Ensure it's set
 
     return df
-
 
 def parse_schema3_data(df: pd.DataFrame, data_col: str) -> pd.DataFrame:
     """Parse schema 3 (page 4) data - Death Causes A and B."""
@@ -580,44 +621,37 @@ def parse_schema3_data(df: pd.DataFrame, data_col: str) -> pd.DataFrame:
 
 
 def parse_schema4_data(df: pd.DataFrame, data_col: str) -> pd.DataFrame:
-    """Parse schema 4 (page 5) data - Death Causes C and D."""
+    """Parse schema 4 (page 5) data - Death Causes B, C, and D."""
     for idx, row in df.iterrows():
         data = row[data_col]
-        if pd.isna(data) or not data:
+        if pd.isna(data) or not data or data.upper() == "NULL":
             continue
 
-        # Usually these are NULL
-        if data.upper() == "NULL NULL" or data.upper() == "NULL":
+        # Data is likely 'CauseB Text CauseC Text CauseD Text'
+        # This is very hard to parse reliably.
+        # We will look for "NULL" as a separator first.
+        
+        data = data.strip()
+        if "NULL" in data:
+            parts = data.split("NULL")
+            parts = [p.strip() for p in parts if p.strip()] # Get non-empty parts
+            
+            if len(parts) >= 1:
+                df.at[idx, "DeathCauseB"] = parts[0]
+            if len(parts) >= 2:
+                df.at[idx, "DeathCauseC"] = parts[1]
+            if len(parts) >= 3:
+                df.at[idx, "DeathCauseD"] = parts[2]
+        else:
+            # No NULLs. This is the hard case.
+            # We'll put everything in CauseB for now.
+            # A more complex parser would be needed to split this.
+            # Example: "STAGE IV LIVER CANCER ALCOHOLIC LIVER CIRRHOSIS TYPE II DIABETES"
+            # It's not feasible to split this with simple rules.
+            df.at[idx, "DeathCauseB"] = data
             df.at[idx, "DeathCauseC"] = "NULL"
             df.at[idx, "DeathCauseD"] = "NULL"
-        elif "NULL" in data:
-            # Split by NULL
-            parts = data.split("NULL")
-
-            # First non-empty part is C
-            for part in parts:
-                if part.strip():
-                    df.at[idx, "DeathCauseC"] = part.strip()
-                    break
-
-            # Second non-empty part is D (rare)
-            non_empty_parts = [p.strip() for p in parts if p.strip()]
-            if len(non_empty_parts) > 1:
-                df.at[idx, "DeathCauseD"] = non_empty_parts[1]
-            else:
-                df.at[idx, "DeathCauseD"] = "NULL"
-        else:
-            # Very rare - both causes present
-            # Try to split intelligently
-            if len(data) > 50 and ";" in data:
-                parts = data.split(";", 1)
-                df.at[idx, "DeathCauseC"] = parts[0].strip()
-                df.at[idx, "DeathCauseD"] = parts[1].strip()
-            else:
-                # Put all in C
-                df.at[idx, "DeathCauseC"] = data
-                df.at[idx, "DeathCauseD"] = "NULL"
-
+            
     return df
 
 
