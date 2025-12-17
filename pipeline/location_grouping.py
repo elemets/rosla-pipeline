@@ -248,6 +248,7 @@ if __name__ == "__main__":
     gdf_merged = gdf_merged.reset_index(drop=True)
 
     #### Merge racial categories
+    gdf_merged = joining_similar_columns(gdf_merged)
 
     gdf_merged["Race"] = gdf_merged["Race"].apply(clean_and_categorize_race)
 
@@ -274,6 +275,7 @@ if __name__ == "__main__":
             "address.death",
             "index__census",
             "OBJECTID_left",
+            "Races",
             "OBJECTID_right",
         ],
         inplace=True,

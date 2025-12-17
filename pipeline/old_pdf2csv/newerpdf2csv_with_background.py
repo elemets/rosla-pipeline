@@ -408,7 +408,10 @@ def extract_race_label(val: object) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description="Convert DME-style PDF to row-per-CaseNum CSV.")
-    ap.add_argument("pdf", help="Input PDF path")
+    ap.add_argument("pdf",         nargs="?",
+        default="./pipeline_steps/input_files/raw/PRARequest12102025.pdf",
+        help="Input PDF path",
+)
     ap.add_argument("-o", "--output", default="cases.csv", help="Output CSV path")
     ap.add_argument("--pages", default=None,
                     help="Optional page selection, e.g. '1-60' or '1-60,120,500-540'")

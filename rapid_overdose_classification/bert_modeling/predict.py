@@ -100,7 +100,7 @@ def predict(
     ),
     text_col: str = typer.Argument(..., help="Name of the column containing text data"),
     model_type: str = typer.Argument(
-        ..., help="Type of BERT model ('BERT' or 'Bio_ClinicalBERT')"
+        ..., help="Type of BERT model ('BERT' or 'bioclinicalbert')"
     ),
 ):
     """
