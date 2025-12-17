@@ -157,3 +157,5 @@ outcomes_squashed.pkl
 models/
 pipeline/pipeline_steps/*/
 pipeline/pipeline_steps/*.csv
+data/required_for_conversion/glove.6B.100d.txt
+data/required_for_conversion/cui2vec_pickled.pkl
