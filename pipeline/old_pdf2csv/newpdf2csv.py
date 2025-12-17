@@ -826,11 +826,11 @@ def clean_final_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 @app.command()
 def main(
     pdf_path: str = typer.Argument(
-        "./pipeline_steps/input_files/raw/NewDMEC.pdf",
+        "./pipeline_steps/input_files/raw/PRARequest12102025.pdf",
         help="Path to the input PDF file",
     ),
     output_csv: str = typer.Argument(
-        "./pipeline_steps/input_files/converted/coroner_data_completedmec2.csv",
+        "./pipeline_steps/input_files/converted/prarequest121025.csv",
         help="Path to the output CSV file",
     ),
 ):
