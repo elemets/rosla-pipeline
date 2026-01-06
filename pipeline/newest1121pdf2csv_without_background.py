@@ -324,7 +324,7 @@ def process_pdf(pdf_path: Path, verbose: bool = False) -> pd.DataFrame:
 @app.command()
 def main(
     input_pdf: Path = typer.Argument(
-        "./pipeline_steps/input_files/raw/LatestRequestPRA11212025.pdf",
+        "./pipeline_steps/input_files/raw/rawnewdmex/LatestRequestPRA11212025.pdf",
         exists=True, file_okay=True, readable=True,
         help="Path to the input PDF file.",
     ),
