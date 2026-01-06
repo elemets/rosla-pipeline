@@ -5,44 +5,127 @@ from collections import Counter
 from typing import List, Dict, Tuple, Optional
 import typer
 
-
 app = typer.Typer()
 
+
+
+# Token pattern that also matches truncated values like "White/C" or "Hispani"
+_RACE_TOKEN = r"(?:White\/C\w*|Hisp\w*(?:\/Lat\w*)?|Black|Asian|Native\s+American|Unknown\/Other|Unknown|Other|NULL)"
+_RACE_END_RE = re.compile(rf"(?:{_RACE_TOKEN})(?:\s*,\s*(?:{_RACE_TOKEN}))*\s*$", re.IGNORECASE)
+
+def normalize_race_value(raw: str) -> str:
+    """
+    Normalize race values, including truncated ones:
+      - 'Hispani' -> 'Hispanic/Latino'
+      - 'White/C' -> 'White/Caucasian'
+      - 'Unknown/Other' stays as 'Unknown/Other'
+      - handles multi-values like 'White/Caucasian,Unknown/Other'
+    """
+    if raw is None:
+        return "NULL"
+    raw = str(raw).strip()
+    if not raw:
+        return "NULL"
+
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        return "NULL"
+
+    normalized = []
+    seen = set()
+
+    for p in parts:
+        t = p.strip().lower()
+
+        if t in ("null", "none", "n/a", "na", ""):
+            n = "NULL"
+        elif t.startswith("white/c") or "cauc" in t or "white" in t:
+            n = "White/Caucasian"
+        elif t.startswith("hisp") or "latino" in t or "latina" in t:
+            n = "Hispanic/Latino"
+        elif "black" in t or "african" in t or t in ("b", "aa"):
+            n = "Black"
+        elif "asian" in t or "pacific" in t or t == "a":
+            n = "Asian"
+        elif "native" in t:
+            n = "Native American"
+        elif "unknown" in t or "other" in t:
+            n = "Unknown/Other"
+        else:
+            n = p  # keep as-is if it's something unexpected
+
+        if n not in seen:
+            seen.add(n)
+            normalized.append(n)
+
+    if all(x == "NULL" for x in normalized):
+        return "NULL"
+    return ",".join(normalized)
+
+def split_race_from_end(text: str) -> tuple[str | None, str]:
+    """
+    Returns (normalized_race_or_None, remainder_without_race).
+    Only matches if the race token(s) appear at the very end of the text.
+    """
+    if text is None:
+        return None, ""
+    cleaned = re.sub(r"\s+", " ", str(text).strip())
+    if not cleaned:
+        return None, ""
+
+    m = _RACE_END_RE.search(cleaned)
+    if not m:
+        return None, cleaned
+
+    race_raw = m.group(0).strip()
+    remainder = cleaned[:m.start()].strip()
+    return normalize_race_value(race_raw), remainder
+
 def detect_schema_type(page_text: str) -> Optional[int]:
-    """
-    Detects the schema type of a page based on its header keywords.
-    """
     if not page_text:
         return None
 
     lines = page_text.strip().split("\n")
-    header_text = " ".join(lines[:5]).lower()
 
-    # Check for the most specific/defining keywords for each schema
-    # The new PDF seems to combine schemas, so we assign a primary type.
+    # Use more lines; pdfplumber sometimes pushes header words down
+    header_text = " ".join(lines[:15]).lower()
 
+    # Schema 7: OtherCause + Races (DeathCauseD may be present or not depending on PDF)
+    if "othercause" in header_text and "races" in header_text:
+        return 7
+
+    # Schema 4: Cause B, C, D
     if "deathcauseb" in header_text and "deathcausec" in header_text and "deathcaused" in header_text:
-        # Page Group: Cause B, C, D
         return 4
-    if "injurydesc" in header_text and "mode" in header_text and "deathcausea" in header_text:
-        # Page Group: Injury, Mode, Cause A
+
+    # Schema 2: Injury page (DeathCauseA may or may not be on this same page)
+    if "injurydesc" in header_text and "mode" in header_text:
         return 2
-    if "races" in header_text and "gender" in header_text and "age" in header_text:
-        # Page Group: Demographics
+
+    # Schema 6: Demographics page (sometimes races is missing but gender/age present)
+    if "gender" in header_text and "age" in header_text and "races" in header_text:
         return 6
+    if "gender" in header_text and "age" in header_text:
+        return 6
+
+    # Schema 5: OtherCause-only pages
     if "othercause" in header_text:
-        # Page Group: Other Cause
         return 5
+
+    # Schema 1: Locations
     if "deathcity" in header_text and "eventplace" in header_text:
-        # Page Group: Locations
         return 1
+
+    # Schema 0: Names/date/place
     if "firstname" in header_text and "lastname" in header_text and "deathdate" in header_text:
-        # Page Group: Name, Date, Place
         return 0
-    
-    # Fallback for original schema pages (less likely)
+
+    # Fallback for cause pages
     if "deathcausea" in header_text and "deathcauseb" in header_text:
         return 3
+
+    return None
+
 
     return None  # Unidentified
 def analyze_pdf_format(pdf_path: str, sample_pages: int = 100) -> Dict:
@@ -136,17 +219,18 @@ def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
             # --- END MODIFICATION ---
 
             # Method 1: Try table extraction
+            records = []  # IMPORTANT: reset every page
             try:
                 tables = page.extract_tables()
                 if tables and len(tables[0]) > 1:
-                    records = extract_from_table(tables[0], schema_type)
-                    if records:
-                        all_records.extend(records)
-                        extraction_stats["table_success"] += 1
-                        continue
-            except Exception as e:
-                pass
+                    records = extract_from_table(tables[0], schema_type, page_idx)
+            except Exception:
+                records = []
 
+            if records:
+                all_records.extend(records)
+                extraction_stats["table_success"] += 1
+                continue
             # Method 2: Try structured text parsing
             try:
                 if text:
@@ -172,6 +256,8 @@ def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
         print(f"  First 10 unidentified pages: {extraction_stats['unidentified_schema_pages'][:10]}")
 
     # Convert to DataFrame
+
+    print("SchemaType counts:", Counter(r["SchemaType"] for r in all_records))
     if all_records:
         df = pd.DataFrame(all_records)
         df = merge_by_case_number(df)
@@ -179,38 +265,44 @@ def simple_extraction_with_fallback(pdf_path: str) -> pd.DataFrame:
 
     return pd.DataFrame()
 
-def extract_from_table(table: List[List], schema_type: int) -> List[Dict]:
-    """Extract records from a table structure."""
+def extract_from_table(table: List[List], schema_type: int, page_num: int) -> List[Dict]:
+    """Extract records from a table structure and produce RawData for downstream parsers."""
     if not table or len(table) < 2:
         return []
 
     records = []
-    headers = [str(h).strip() for h in table[0]]
-
     for row in table[1:]:
         if not row or not any(str(cell).strip() for cell in row):
             continue
 
-        # Check first cell for case number
         first_cell = str(row[0]).strip()
         if not re.match(r"^20\d{2}-\d{4,5}$", first_cell):
             continue
 
-        record = {
-            "CaseNum": first_cell,
-            "SchemaType": schema_type,
-            "ExtractionMethod": "table",
-        }
+        # Join remaining cells into a single RawData string so post_process_raw_data() works
+        raw_parts = []
+        for v in row[1:]:
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                raw_parts.append(s)
 
-        # Add other fields
-        for i, value in enumerate(row[1:], 1):
-            if i < len(headers):
-                record[f"Field_{i}"] = str(value).strip() if value else "NULL"
+        raw = re.sub(r"\s+", " ", " ".join(raw_parts)).strip()
+        if not raw:
+            raw = "NULL"
 
-        records.append(record)
+        records.append(
+            {
+                "CaseNum": first_cell,
+                "SchemaType": schema_type,
+                "PageNum": page_num,
+                "RawData": raw,
+                "ExtractionMethod": "table",
+            }
+        )
 
     return records
-
 
 def extract_from_text_flexible(
     text: str, schema_type: int, page_num: int
@@ -290,37 +382,77 @@ def extract_from_text_flexible(
 
 
 def merge_by_case_number(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Merge records by case number and schema type.
-    """
     if df.empty:
         return df
 
-    # Group by CaseNum and SchemaType
-    grouped = df.groupby(["CaseNum", "SchemaType"])
-
-    # Aggregate data
+    grouped = df.groupby(["CaseNum", "SchemaType"], dropna=False)
     merged_records = []
 
     for (case_num, schema_type), group in grouped:
-        # Combine all raw data for this case and schema
-        raw_data = " ".join(group["RawData"].fillna(""))
+        raw_data = " ".join(group.get("RawData", pd.Series(dtype=object)).fillna("").astype(str)).strip()
 
-        record = {
-            "CaseNum": case_num,
-            f"Schema{schema_type}_Data": raw_data,
-            f"Schema{schema_type}_Pages": ",".join(group["PageNum"].astype(str)),
-        }
+        pages_series = group.get("PageNum")
+        if pages_series is not None:
+            pages = [str(int(p)) for p in pages_series.dropna().tolist() if str(p) != "nan"]
+            pages_str = ",".join(sorted(set(pages)))
+        else:
+            pages_str = ""
 
-        merged_records.append(record)
+        merged_records.append(
+            {
+                "CaseNum": case_num,
+                f"Schema{schema_type}_Data": raw_data if raw_data else "NULL",
+                f"Schema{schema_type}_Pages": pages_str if pages_str else "NULL",
+            }
+        )
 
-    # Create merged dataframe
     merged_df = pd.DataFrame(merged_records)
-
-    # Pivot to have one row per case
     final_df = merged_df.groupby("CaseNum").first().reset_index()
-
     return final_df
+
+
+def parse_schema7_data(df: pd.DataFrame, data_col: str) -> pd.DataFrame:
+    """
+    Parse schema 7 data: DeathCauseD + OtherCause + Races.
+    Race is reliably at the end of the line, so we peel it off first.
+
+    Remainder heuristic:
+      - If remainder starts with NULL => DeathCauseD = NULL, OtherCause = rest
+      - Otherwise keep remainder as OtherCause (safer than guessing DeathCauseD)
+    """
+    for col in ["DeathCauseD", "OtherCause", "Races"]:
+        if col not in df.columns:
+            df[col] = "NULL"
+
+    for idx, row in df.iterrows():
+        data = row.get(data_col)
+        if pd.isna(data) or not str(data).strip():
+            continue
+
+        cleaned = re.sub(r"\s+", " ", str(data).strip())
+
+        race, remainder = split_race_from_end(cleaned)
+        if race is not None and (str(df.at[idx, "Races"]) in ("NULL", "", "nan") or pd.isna(df.at[idx, "Races"])):
+            df.at[idx, "Races"] = race
+
+        remainder = remainder.strip()
+        if not remainder or remainder.upper() == "NULL":
+            # Nothing else usable
+            continue
+
+        # If DeathCauseD is NULL explicitly, peel it off and keep what's left as OtherCause
+        if re.match(r"^NULL\b", remainder, re.IGNORECASE):
+            rest = re.sub(r"^NULL\b", "", remainder, flags=re.IGNORECASE).strip()
+            if str(df.at[idx, "DeathCauseD"]) in ("NULL", "", "nan") or pd.isna(df.at[idx, "DeathCauseD"]):
+                df.at[idx, "DeathCauseD"] = "NULL"
+            if str(df.at[idx, "OtherCause"]) in ("NULL", "", "nan") or pd.isna(df.at[idx, "OtherCause"]):
+                df.at[idx, "OtherCause"] = rest if rest else "NULL"
+        else:
+            # Ambiguous (could be DeathCauseD or OtherCause); keep it as OtherCause to avoid losing info
+            if str(df.at[idx, "OtherCause"]) in ("NULL", "", "nan") or pd.isna(df.at[idx, "OtherCause"]):
+                df.at[idx, "OtherCause"] = remainder
+
+    return df
 
 def post_process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -349,6 +481,7 @@ def post_process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         4: ["DeathCauseC", "DeathCauseD"], # Now handled by schema 4 parser
         5: ["OtherCause"],
         6: ["Races", "Gender", "Age"],
+        7: ["DeathCauseD", "OtherCause", "Races"],
     }
 
     # Process each schema's data
@@ -378,6 +511,8 @@ def post_process_raw_data(df: pd.DataFrame) -> pd.DataFrame:
                 df = parse_schema5_data(df, data_col)
             elif schema_type == 6:
                 df = parse_schema6_data(df, data_col)
+            elif schema_type == 7:
+                df = parse_schema7_data(df, data_col)
 
     return df
 

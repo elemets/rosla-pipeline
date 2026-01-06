@@ -104,9 +104,10 @@ def create_text_col(input_df):
     cause_alphabet = ["CauseA", "CauseB", "CauseC"]
     cause_secondary = ["PrimaryCause", "SecondaryCause"]
 
+
     if any(x in standardized_columns for x in cause_alphabet):
         input_df["text"] = (
-            input_df["CauseA"].astype(str) + ", " + input_df["CauseB"].astype(str)
+            input_df["CauseA"].astype(str) + ", " + input_df["CauseB"].astype(str) + ", "
         )
 
     elif any(x in standardized_columns for x in cause_secondary):
@@ -115,6 +116,12 @@ def create_text_col(input_df):
             + ", "
             + input_df["SecondaryCause"].astype(str)
         )
+
+    elif ['InjuryDesc'] in standardized_columns:
+        input_df['text'] = input_df['text'].astype(str) + input_df['InjuryDesc'].astype(str)
+
+
+    # Cleaning text column making sure we deal with typos
 
     else:
         raise ValueError("Required cause columns are missing in the input DataFrame.")
