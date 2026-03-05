@@ -24,22 +24,21 @@ from pathlib import Path
 
 PROCESSED_FILES_LOG = "./pipeline_steps/logs/processed_files.txt"
 
-
 def fill_from_historical(group, historical_data):
+    """Fills missing Age and DateofBirth using historical records."""
+    for col in ["Age", "DateofBirth"]:
+        if col not in group.columns:
+            group[col] = pd.NA
+        if not historical_data.empty and col not in historical_data.columns:
+            historical_data[col] = pd.NA
+
     if len(group) == 1:
         row = group.iloc[0]
-        if (
-            pd.isna(row["Age"])
-            and pd.isna(row["DateofBirth"])
-            and not historical_data.empty
-        ):
-            historical_match = historical_data[
-                historical_data["CaseNumber"] == row["CaseNumber"]
-            ]
+        if pd.isna(row["Age"]) and pd.isna(row["DateofBirth"]) and not historical_data.empty:
+            historical_match = historical_data[historical_data["CaseNumber"] == row["CaseNumber"]]
             if not historical_match.empty:
                 historical_match = historical_match[
-                    historical_match["Age"].notna()
-                    | historical_match["DateofBirth"].notna()
+                    historical_match["Age"].notna() | historical_match["DateofBirth"].notna()
                 ]
                 if not historical_match.empty:
                     latest_record = historical_match.iloc[-1]
@@ -60,13 +59,10 @@ def fill_from_historical(group, historical_data):
         if not historical_match.empty:
             latest_historical = historical_match.iloc[-1]
             group.iloc[-1, group.columns.get_loc("Age")] = latest_historical["Age"]
-            group.iloc[-1, group.columns.get_loc("DateofBirth")] = latest_historical[
-                "DateofBirth"
-            ]
+            group.iloc[-1, group.columns.get_loc("DateofBirth")] = latest_historical["DateofBirth"]
             return group.iloc[[-1]]
 
     return group.iloc[[-1]]
-
 
 def load_historical_data(geocode_dir):
     """

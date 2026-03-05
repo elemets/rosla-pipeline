@@ -1,4 +1,3 @@
-import sys
 import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -42,7 +41,7 @@ class TextDataset(Dataset):
         return encoding
 
 
-def predict(pred_df, model_name, location_of_file, batch_size=16):
+def predict(pred_df, model_name, batch_size=16):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     n_gpus = torch.cuda.device_count()
 
@@ -128,6 +127,15 @@ def create_text_col(input_df):
 
     return input_df
 
+def classify_file(df: str, output_path: str, model_name: str, batch_size: int = 1024):
+
+    df = create_text_col(df)
+    pred_df = predict(df, model_name, batch_size=batch_size)
+
+    pred_df.to_csv(output_path, index=False)
+
+    return pred_df
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Classify text data.")
@@ -151,7 +159,7 @@ if __name__ == "__main__":
     input_df = create_text_col(input_df)
 
     # Predict on the dataset with batch size to handle large input
-    pred_df = predict(input_df, model_name, location_of_file, batch_size=1024)
+    pred_df = predict(input_df, model_name, batch_size=1024)
     output_df = pred_df[pred_df["Any Drugs"] != 0].reset_index(drop=True)
     output_df["source_file"] = str(location_of_file)
     # Saving the results to CSV
