@@ -174,6 +174,62 @@ def clean_and_categorize_race(race):
     else:
         return race
 
+def final_clean(current_df):
+
+
+    valid_races = [
+    "WHITE",
+    "LATINE",
+    "BLACK",
+    "ASIAN",
+    "MIDDLE EASTERN",
+    "AMERICAN INDIAN",
+    "PACIFIC ISLANDER",
+    "UNKNOWN"
+    ]
+
+
+    gender_map = {
+        "M": "MALE",
+        "MALE": "MALE",
+        "F": "FEMALE",
+        "FEMALE": "FEMALE",
+        "NON-BINARY": "NON-BINARY"
+    }
+
+    current_df["Mode"] = (
+        current_df["Mode"]
+        .str.replace("\n", "", regex=False)   
+        .str.strip()                          
+        .str.upper()                          
+    )
+
+    current_df["Mode"] = current_df["Mode"].replace({
+        "UNDETERMI": "UNDETERMINED"
+    })
+
+    # standardize then filter
+    current_df["Race"] = (
+        current_df["Race"]
+        .str.replace("\n", "", regex=False)
+        .str.strip()
+        .str.upper()
+    )
+
+    current_df.loc[~current_df["Race"].isin(valid_races), "Race"] = np.nan
+
+    current_df["Gender"] = (
+        current_df["Gender"]
+        .str.replace("\n", "", regex=False)
+        .str.strip()
+        .str.upper()
+    )
+
+
+    current_df["Gender"] = current_df["Gender"].map(gender_map)
+    
+    return current_df
+
 
 if __name__ == "__main__":
 
@@ -286,6 +342,8 @@ if __name__ == "__main__":
     gdf_merged["Age"] = gdf_merged["Age"].str.extract("(\d+)").astype(float)
 
     gdf_merged = gdf_merged.drop_duplicates(subset="CaseNumber", keep="last")
+
+    gdf_merged = final_clean=(gdf_merged)
 
     gdf_merged.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
         output_path, index=False
