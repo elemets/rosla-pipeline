@@ -162,5 +162,8 @@ if __name__ == "__main__":
     pred_df = predict(input_df, model_name, batch_size=1024)
     output_df = pred_df[pred_df["Any Drugs"] != 0].reset_index(drop=True)
     output_df["source_file"] = str(location_of_file)
+
+
+    
     # Saving the results to CSV
     output_df.to_csv(f"{output_name}")
