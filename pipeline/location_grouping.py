@@ -230,6 +230,11 @@ def final_clean(current_df):
     
     return current_df
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    return v.lower() in ("yes", "true", "t", "1")
+
 
 if __name__ == "__main__":
 
@@ -238,10 +243,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "-o", "--output_dir", required=True, help="Output directory for the final CSV."
     )
+    parser.add_argument("-n", "--dropname", required=False, default=True, type=str2bool)
     args = parser.parse_args()
 
     input_file = args.input
     output_dir = args.output_dir
+    dropname = args.dropname
 
     # Read the input CSV file
     df = pd.read_csv(input_file)
@@ -309,34 +316,59 @@ if __name__ == "__main__":
     gdf_merged["Race"] = gdf_merged["Race"].apply(clean_and_categorize_race)
 
     #### Dropping irrelevant columns
-
-    gdf_merged.drop(
-        columns=[
-            "DeathAddr",
-            "EventAddr",
-            "address.death",
-            "eventaddress",
-            "address",
-            "EventCityDesc.1",
-            "Unnamed: 0",
-            "Zip",
-            "Zip.1",
-            "FirstName",
-            "MiddleName",
-            "LastName",
-            "CauseC",
-            "CauseD",
-            "Unnamed: 0.1",
-            "Unnamed: 0",
-            "address.death",
-            "index__census",
-            "OBJECTID_left",
-            "Races",
-            "OBJECTID_right",
-        ],
-        inplace=True,
-        errors="ignore",
-    )
+    if dropname:
+        gdf_merged.drop(
+            columns=[
+                "DeathAddr",
+                "EventAddr",
+                "address.death",
+                "eventaddress",
+                "address",
+                "EventCityDesc.1",
+                "Unnamed: 0",
+                "Zip",
+                "Zip.1",
+                "FirstName",
+                "MiddleName",
+                "LastName",
+                "CauseC",
+                "CauseD",
+                "Unnamed: 0.1",
+                "Unnamed: 0",
+                "address.death",
+                "index__census",
+                "OBJECTID_left",
+                "Races",
+                "OBJECTID_right",
+            ],
+            inplace=True,
+            errors="ignore",
+        )
+    else:
+        gdf_merged.drop(
+            columns=[
+                "DeathAddr",
+                "EventAddr",
+                "address.death",
+                "eventaddress",
+                "address",
+                "EventCityDesc.1",
+                "Unnamed: 0",
+                "Zip",
+                "Zip.1",
+                "CauseC",
+                "CauseD",
+                "Unnamed: 0.1",
+                "Unnamed: 0",
+                "address.death",
+                "index__census",
+                "OBJECTID_left",
+                "Races",
+                "OBJECTID_right",
+            ],
+            inplace=True,
+            errors="ignore",
+        )
 
     ### Age clean up
     gdf_merged["Age"] = gdf_merged["Age"].str.extract("(\d+)").astype(float)
