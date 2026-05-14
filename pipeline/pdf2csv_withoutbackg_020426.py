@@ -12,7 +12,7 @@ Tested against:
 """
 
 from __future__ import annotations
-
+from tqdm import tqdm
 import bisect
 import re
 from dataclasses import dataclass
@@ -222,13 +222,14 @@ def parse_pdf_to_dataframe(pdf_path: str, max_pages: Optional[int] = None, verbo
     parsed_pages = 0
     rows_total = 0
     skipped_pages = 0
+    print("parsing PDF")
 
     with pdfplumber.open(pdf_path) as pdf:
         total_pages = len(pdf.pages)
         if max_pages is not None:
             total_pages = min(total_pages, max_pages)
 
-        for i in range(total_pages):
+        for i in tqdm(range(total_pages), desc="Parsing pages", unit="page", disable=not verbose):            
             page_num = i + 1
             page_rows = parse_page_tables(pdf.pages[i])
 

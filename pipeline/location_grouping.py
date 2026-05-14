@@ -132,12 +132,16 @@ def parse_dates(row):
 def clean_and_categorize_race(race):
     if pd.isna(race):
         return np.nan
-    race = race.lower()  # Case folding
-    race = race.replace(" ", "")  # Remove spaces
-    race = race.replace("\n", "")  # Remove newline characters
-    if '","' in race or "," in race:  # Adjust based on your actual separator
-        return "UNKNOWN"
 
+    race = race.lower()           # Case folding
+    race = race.replace(" ", "")  # Remove spaces
+    race = race.replace("\n", "") # Remove newline characters
+
+    # If multiple races are listed in one row, pick the first
+    if "," in race:
+        parts = [p for p in race.split(",") if p not in ("unknown/other", "unknown", "null")]
+        race = parts[0] if parts else "unknown/other"
+        
     if race in ["americanindian", "nativeamerican"]:
         return "AMERICAN INDIAN"
     elif race in ["armenian", "middleeastern"]:
@@ -173,7 +177,7 @@ def clean_and_categorize_race(race):
         return np.nan
     else:
         return race
-
+    
 def final_clean(current_df):
 
 

@@ -435,7 +435,12 @@ def append_to_master_geocoded(new_geocoded_file):
     if os.path.exists(master_file):
         master_df = pd.read_csv(master_file)
     else:
-        master_df = pd.DataFrame()
+        # Rebuild from all individual geocoded files so deleting the master is safe
+        prior = [
+            f for f in glob.glob(os.path.join(geocode_dir, "*_geocoded.csv"))
+            if f != master_file and os.path.abspath(f) != os.path.abspath(new_geocoded_file)
+        ]
+        master_df = pd.concat([pd.read_csv(f, low_memory=False) for f in prior], ignore_index=True) if prior else pd.DataFrame()
     new_df = pd.read_csv(new_geocoded_file)
 
     combined_df = pd.concat([master_df, new_df], ignore_index=True)
