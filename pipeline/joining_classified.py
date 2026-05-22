@@ -5,6 +5,44 @@ import sys
 import argparse
 
 
+def coalesce_duplicate_rows(df, subset):
+    """
+    Collapse rows that share the same value(s) in `subset` into a single row.
+
+    Instead of arbitrarily keeping the first duplicate, the row with the most
+    non-null values is used as the base, and any remaining nulls are then
+    filled in using values from the other rows in the same group.
+
+    Parameters:
+    - df (pd.DataFrame): The DataFrame to deduplicate.
+    - subset (str or list): Column name(s) that identify a duplicate.
+
+    Returns:
+    - pd.DataFrame: One row per unique `subset` value, with nulls minimized.
+    """
+    original_columns = df.columns.tolist()
+
+    # Rank rows by how complete they are (most non-null values first).
+    # A *stable* sort preserves any prior ordering (e.g. the Any Drugs /
+    # DeathDate sort) as a tie-breaker among rows that are equally complete.
+    completeness = df.notna().sum(axis=1)
+    df_sorted = (
+        df.assign(_completeness=completeness)
+        .sort_values("_completeness", ascending=False, kind="stable")
+        .drop(columns="_completeness")
+    )
+
+    # groupby().first() takes the first *non-null* value in each column, so
+    # the base (most complete) row's values win and any gaps are filled from
+    # the remaining rows in the group.
+    combined = df_sorted.groupby(
+        subset, as_index=False, sort=False, dropna=False
+    ).first()
+
+    # Restore the original column order (groupby moves the key columns first).
+    return combined[original_columns]
+
+
 def combine_classified_csv_files(folder_path, output_file=None):
     """
     Combines all CSV files ending with '_classified.csv' in the specified folder into a single DataFrame.
@@ -59,14 +97,15 @@ def combine_classified_csv_files(folder_path, output_file=None):
             by=["Any Drugs", "DeathDate"], ascending=[False, False]
         )
 
-        # Drop duplicates based on "CaseNumber," keeping the first occurrence (which now has priority based on the sort)
-        dmec_combined_df = dmec_combined_df.drop_duplicates(
-            subset="CaseNumber", keep="first"
+        # Collapse duplicate "CaseNumber" rows: keep the most complete row and
+        # fill its remaining nulls from the other duplicate rows.
+        dmec_combined_df = coalesce_duplicate_rows(
+            dmec_combined_df, subset="CaseNumber"
         )
 
-        # Display the shape of the DataFrame after dropping duplicates
+        # Display the shape of the DataFrame after collapsing duplicates
         print(
-            f"DMEC combined DataFrame shape (after dropping duplicates): {dmec_combined_df.shape}"
+            f"DMEC combined DataFrame shape (after coalescing duplicates): {dmec_combined_df.shape}"
         )
 
         df_list.append(dmec_combined_df)
@@ -84,17 +123,19 @@ def combine_classified_csv_files(folder_path, output_file=None):
             except Exception as e:
                 print(f"Error reading UCLA file {file}: {e}")
 
-        # Concatenate UCLA DataFrames and drop duplicates in 'CaseNumber'
+        # Concatenate UCLA DataFrames and drop duplicates in 'CaseNum'
         ucla_combined = pd.concat(ucla_dfs, ignore_index=True)
         ucla_combined = ucla_combined.sort_values(
             by=["Any Drugs", "DeathDate"], ascending=[False, False]
         )
 
-        ucla_combined = ucla_combined.drop_duplicates(subset="CaseNum", keep="first")
+        # Collapse duplicate "CaseNum" rows: keep the most complete row and
+        # fill its remaining nulls from the other duplicate rows.
+        ucla_combined = coalesce_duplicate_rows(ucla_combined, subset="CaseNum")
 
-        # Display the shape of the DataFrame after dropping duplicates
+        # Display the shape of the DataFrame after collapsing duplicates
         print(
-            f"UCLA combined DataFrame shape (after dropping duplicates): {ucla_combined.shape}"
+            f"UCLA combined DataFrame shape (after coalescing duplicates): {ucla_combined.shape}"
         )
 
         df_list.append(ucla_combined)

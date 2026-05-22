@@ -24,45 +24,96 @@ from pathlib import Path
 
 PROCESSED_FILES_LOG = "./pipeline_steps/logs/processed_files.txt"
 
-def fill_from_historical(group, historical_data):
-    """Fills missing Age and DateofBirth using historical records."""
-    for col in ["Age", "DateofBirth"]:
-        if col not in group.columns:
-            group[col] = pd.NA
-        if not historical_data.empty and col not in historical_data.columns:
-            historical_data[col] = pd.NA
 
-    if len(group) == 1:
-        row = group.iloc[0]
-        if pd.isna(row["Age"]) and pd.isna(row["DateofBirth"]) and not historical_data.empty:
-            historical_match = historical_data[historical_data["CaseNumber"] == row["CaseNumber"]]
-            if not historical_match.empty:
-                historical_match = historical_match[
-                    historical_match["Age"].notna() | historical_match["DateofBirth"].notna()
-                ]
-                if not historical_match.empty:
-                    latest_record = historical_match.iloc[-1]
-                    group.at[row.name, "Age"] = latest_record["Age"]
-                    group.at[row.name, "DateofBirth"] = latest_record["DateofBirth"]
-        return group
+def coalesce_duplicate_rows(df, subset, tie_keep="first"):
+    """
+    Collapse rows that share the same value(s) in `subset` into a single row.
 
-    has_age_data = group["Age"].notna() | group["DateofBirth"].notna()
-    if has_age_data.any():
-        return group[has_age_data].iloc[[-1]]
+    The row with the most non-null values is used as the base, and any
+    remaining nulls are then filled in using values from the other rows in
+    the same group, so the result keeps as much data as possible.
 
-    if not historical_data.empty:
-        case_number = group["CaseNumber"].iloc[0]
-        historical_match = historical_data[
-            (historical_data["CaseNumber"] == case_number)
-            & (historical_data["Age"].notna() | historical_data["DateofBirth"].notna())
-        ]
-        if not historical_match.empty:
-            latest_historical = historical_match.iloc[-1]
-            group.iloc[-1, group.columns.get_loc("Age")] = latest_historical["Age"]
-            group.iloc[-1, group.columns.get_loc("DateofBirth")] = latest_historical["DateofBirth"]
-            return group.iloc[[-1]]
+    Parameters:
+    - df (pd.DataFrame): The DataFrame to deduplicate.
+    - subset (str or list): Column name(s) that identify a duplicate.
+    - tie_keep (str): For cells where equally complete rows hold *different*
+      non-null values, "first" keeps the earlier row's value and "last"
+      keeps the later row's value (mirrors drop_duplicates' keep argument).
 
-    return group.iloc[[-1]]
+    Returns:
+    - pd.DataFrame: One row per unique `subset` value, with nulls minimized.
+    """
+    original_columns = df.columns.tolist()
+
+    # Rank rows by how complete they are (most non-null values first).
+    completeness = df.notna().sum(axis=1)
+    df_ranked = df.assign(_completeness=completeness)
+
+    # Among equally complete rows a *stable* sort preserves the existing row
+    # order, so the first row would win ties. Reverse first when the caller
+    # wants the last row to win instead.
+    if tie_keep == "last":
+        df_ranked = df_ranked[::-1]
+
+    df_sorted = df_ranked.sort_values(
+        "_completeness", ascending=False, kind="stable"
+    ).drop(columns="_completeness")
+
+    # groupby().first() takes the first *non-null* value in each column, so
+    # the base (most complete) row's values win and any gaps are filled from
+    # the remaining rows in the group.
+    combined = df_sorted.groupby(
+        subset, as_index=False, sort=False, dropna=False
+    ).first()
+
+    # Restore the original column order (groupby moves the key columns first).
+    return combined[original_columns]
+
+
+def fill_from_historical(df, historical_data):
+    """
+    Fill remaining null values in `df` using previously geocoded records.
+
+    `df` is expected to already be one row per CaseNumber (e.g. the output of
+    coalesce_duplicate_rows). For every row that still has nulls, values are
+    pulled from historical records sharing the same CaseNumber. Existing
+    (non-null) values in `df` are never overwritten.
+
+    Only columns present in both `df` and the historical data are touched, so
+    no unexpected columns are introduced into the pipeline.
+
+    Parameters:
+        df (pd.DataFrame): Current data, expected to be one row per CaseNumber.
+        historical_data (pd.DataFrame): Combined prior geocoded records.
+
+    Returns:
+        pd.DataFrame: `df` with nulls filled wherever historical data allowed.
+    """
+    if historical_data is None or historical_data.empty:
+        return df
+    if "CaseNumber" not in df.columns or "CaseNumber" not in historical_data.columns:
+        return df
+
+    df = df.copy()
+
+    # Collapse historical records down to one best row per CaseNumber so each
+    # current row has a single, most-complete historical record to draw from.
+    hist = coalesce_duplicate_rows(
+        historical_data, subset="CaseNumber", tie_keep="last"
+    ).set_index("CaseNumber")
+
+    # Line up one historical row per current row, matched on CaseNumber.
+    # Rows with no historical match come back as all-null and change nothing.
+    aligned = hist.reindex(df["CaseNumber"].values)
+    aligned.index = df.index
+
+    # Fill nulls in df from the aligned historical values; df's own non-null
+    # values always win (combine_first only fills where df is null).
+    shared_cols = [col for col in df.columns if col in aligned.columns]
+    df[shared_cols] = df[shared_cols].combine_first(aligned[shared_cols])
+
+    return df
+
 
 def load_historical_data(geocode_dir):
     """
@@ -447,17 +498,19 @@ def append_to_master_geocoded(new_geocoded_file):
 
     historical_data = load_historical_data(geocode_dir)
 
-    """
-    This ensures that:
-    We now check old dataframes for the same data if we are missing data.
-    If a CaseNumber has any rows with Age/DOB data, we keep the most recent one with data
-    If a CaseNumber has no rows with Age/DOB data, we keep the most recent row
-    Single rows are preserved regardless of whether they have Age/DOB data
-    """
+    # Deduplicate by CaseNumber, then backfill remaining gaps from history:
+    #   1. coalesce_duplicate_rows collapses each CaseNumber to a single row,
+    #      keeping the most complete row and filling its nulls from the other
+    #      duplicate rows (the later row wins when values genuinely conflict).
+    #      Unlike the old logic this preserves data across *all* columns, not
+    #      just Age / DateofBirth.
+    #   2. fill_from_historical fills any values still missing using prior
+    #      geocoded files for the same CaseNumber.
     if "CaseNumber" in combined_df.columns:
-        combined_df = combined_df.groupby("CaseNumber", group_keys=False).apply(
-            lambda x: fill_from_historical(x, historical_data)
+        combined_df = coalesce_duplicate_rows(
+            combined_df, subset="CaseNumber", tie_keep="last"
         )
+        combined_df = fill_from_historical(combined_df, historical_data)
 
     # Save the updated master file
     combined_df.to_csv(master_file, index=False)

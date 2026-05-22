@@ -94,38 +94,48 @@ def predict(pred_df, model_name, batch_size=16):
 
     return output_df
 
-
 def create_text_col(input_df):
-    # Remove spaces from columns for checking
-    standardized_columns = input_df.columns.str.replace(" ", "")
-    input_df.columns = standardized_columns  # Update columns to be without spaces
+    # Standardize column names by removing spaces, so "Cause A" and "CauseA"
+    # (and "Other Cause" / "OtherCause", etc.) collapse to the same name.
+    input_df.columns = input_df.columns.str.replace(" ", "")
 
-    cause_alphabet = ["CauseA", "CauseB", "CauseC"]
-    cause_secondary = ["PrimaryCause", "SecondaryCause"]
+    # All possible cause columns we want to include (post space-removal).
+    # Order here is the order they'll appear in the concatenated text.
+    cause_columns = [
+        "CauseA",
+        "CauseB",
+        "CauseC",
+        "CauseD",
+        "CauseOther",
+        "OtherCause",
+        "HowInjuryOccurred",
+        "InjuryDesc",
+    ]
 
+    # Keep only the columns actually present, preserving the order above.
+    present_cols = [c for c in cause_columns if c in input_df.columns]
 
-    if any(x in standardized_columns for x in cause_alphabet):
-        input_df["text"] = (
-            input_df["CauseA"].astype(str) + ", " + input_df["CauseB"].astype(str) + ", "
+    if not present_cols:
+        raise ValueError(
+            f"None of the expected cause columns are present in the input. "
+            f"Expected at least one of: {cause_columns}"
         )
 
-    elif any(x in standardized_columns for x in cause_secondary):
-        input_df["text"] = (
-            input_df["PrimaryCause"].astype(str)
-            + ", "
-            + input_df["SecondaryCause"].astype(str)
-        )
-
-    elif ['InjuryDesc'] in standardized_columns:
-        input_df['text'] = input_df['text'].astype(str) + input_df['InjuryDesc'].astype(str)
-
-
-    # Cleaning text column making sure we deal with typos
-
-    else:
-        raise ValueError("Required cause columns are missing in the input DataFrame.")
+    # Build the text column by joining the present cause values per row,
+    # skipping NaN / empty pieces so we don't end up with ", , something".
+    subset = (
+        input_df[present_cols]
+        .fillna("")
+        .astype(str)
+        .apply(lambda s: s.str.strip())
+    )
+    input_df["text"] = subset.apply(
+        lambda row: ", ".join(part for part in row if part),
+        axis=1,
+    )
 
     return input_df
+
 
 def classify_file(df: str, output_path: str, model_name: str, batch_size: int = 1024):
 
