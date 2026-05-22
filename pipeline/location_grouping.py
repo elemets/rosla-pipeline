@@ -21,6 +21,52 @@ columns_to_check = [
 ]
 
 
+def coalesce_duplicate_rows(df, subset, tie_keep="first"):
+    """
+    Collapse rows that share the same value(s) in `subset` into a single row.
+
+    Instead of arbitrarily keeping the first/last duplicate, the row with the
+    most non-null values is used as the base, and any remaining nulls are then
+    filled in using values from the other rows in the same group.
+
+    Parameters:
+    - df (pd.DataFrame): The DataFrame to deduplicate.
+    - subset (str or list): Column name(s) that identify a duplicate.
+    - tie_keep (str): Which row wins for cells where equally complete rows
+      hold *different* non-null values. "first" keeps the earlier row's
+      value, "last" keeps the later row's value (mirrors drop_duplicates'
+      keep argument).
+
+    Returns:
+    - pd.DataFrame: One row per unique `subset` value, with nulls minimized.
+    """
+    original_columns = df.columns.tolist()
+
+    # Rank rows by how complete they are (most non-null values first).
+    completeness = df.notna().sum(axis=1)
+    df_ranked = df.assign(_completeness=completeness)
+
+    # Among equally complete rows a *stable* sort preserves the existing row
+    # order, so the first row would win ties. Reverse first when the caller
+    # wants the last row to win instead.
+    if tie_keep == "last":
+        df_ranked = df_ranked[::-1]
+
+    df_sorted = df_ranked.sort_values(
+        "_completeness", ascending=False, kind="stable"
+    ).drop(columns="_completeness")
+
+    # groupby().first() takes the first *non-null* value in each column, so
+    # the base (most complete) row's values win and any gaps are filled from
+    # the remaining rows in the group.
+    combined = df_sorted.groupby(
+        subset, as_index=False, sort=False, dropna=False
+    ).first()
+
+    # Restore the original column order (groupby moves the key columns first).
+    return combined[original_columns]
+
+
 def join_census_tract(gdf_points, census_geojson):
     # Load the census tracts GeoJSON file
     gdf_census = gpd.read_file(census_geojson)
@@ -377,9 +423,15 @@ if __name__ == "__main__":
     ### Age clean up
     gdf_merged["Age"] = gdf_merged["Age"].str.extract("(\d+)").astype(float)
 
-    gdf_merged = gdf_merged.drop_duplicates(subset="CaseNumber", keep="last")
+    # Collapse duplicate "CaseNumber" rows: keep the most complete row and
+    # fill its remaining nulls from the other duplicate rows. tie_keep="last"
+    # preserves the previous keep="last" preference when two equally complete
+    # rows hold conflicting values.
+    gdf_merged = coalesce_duplicate_rows(
+        gdf_merged, subset="CaseNumber", tie_keep="last"
+    )
 
-    gdf_merged = final_clean=(gdf_merged)
+    gdf_merged = final_clean(gdf_merged)
 
     gdf_merged.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
         output_path, index=False
