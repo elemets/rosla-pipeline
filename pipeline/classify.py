@@ -5,6 +5,11 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import argparse
 
+try:
+    from .regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns
+except ImportError:
+    from regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns
+
 drug_cols = [
     "Methamphetamine",
     "Heroin",
@@ -137,10 +142,26 @@ def create_text_col(input_df):
     return input_df
 
 
-def classify_file(df: str, output_path: str, model_name: str, batch_size: int = 1024):
+def apply_regex_classifier(
+    pred_df: pd.DataFrame, nflis_path=DEFAULT_NFLIS, verbose: bool = True
+) -> pd.DataFrame:
+    patterns = build_patterns(nflis_path)
+    return apply_corrections(pred_df, patterns, verbose=verbose)
+
+
+def classify_file(
+    df: str,
+    output_path: str,
+    model_name: str,
+    batch_size: int = 1024,
+    use_regex: bool = True,
+    nflis_path=DEFAULT_NFLIS,
+):
 
     df = create_text_col(df)
     pred_df = predict(df, model_name, batch_size=batch_size)
+    if use_regex:
+        pred_df = apply_regex_classifier(pred_df, nflis_path=nflis_path)
 
     pred_df.to_csv(output_path, index=False)
 
@@ -152,6 +173,16 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--input", required=True, help="Input CSV/XLSX file.")
     parser.add_argument("-o", "--output", required=True, help="Output CSV file.")
     parser.add_argument("-m", "--model", required=True, help="Model name or path.")
+    parser.add_argument(
+        "--skip-regex",
+        action="store_true",
+        help="Skip the NFLIS-backed regex supplement/correction pass.",
+    )
+    parser.add_argument(
+        "--nflis",
+        default=str(DEFAULT_NFLIS),
+        help="NFLIS substances CSV used by the regex classifier.",
+    )
 
     args = parser.parse_args()
 
@@ -170,10 +201,11 @@ if __name__ == "__main__":
 
     # Predict on the dataset with batch size to handle large input
     pred_df = predict(input_df, model_name, batch_size=1024)
+    if not args.skip_regex:
+        pred_df = apply_regex_classifier(pred_df, nflis_path=args.nflis)
+
     output_df = pred_df[pred_df["Any Drugs"] != 0].reset_index(drop=True)
     output_df["source_file"] = str(location_of_file)
 
-
-    
     # Saving the results to CSV
-    output_df.to_csv(f"{output_name}")
+    output_df.to_csv(f"{output_name}", index=False)
