@@ -1,65 +1,98 @@
-# Pipeline Usage
+# Updated Pipeline Usage
 
-This pipeline is for going from PDF / CSV files without geolocation or classification to
-a final .csv file that contains the classifications and geolocations.
+This is the updated pipeline as of 4 June 2026. It now includes the NFLIS-backed
+regex classification pass and the general drug-use term regex capture in addition
+to the existing BERT classification and geocoding steps.
 
-## Setting up environment
+The pipeline takes raw PDF, CSV, or XLSX files and produces classified,
+geocoded overdose records. The main entry point is `pipeline.py`, which handles
+conversion, classification, geocoding, joining, and output generation.
 
-Currently the pipeline is used by installing the requirements from the requirements.txt.
-You need to create an environment and install all the required packages using:
+## Setup
 
-```pip install -r requirements.txt```
+Create an environment and install the pipeline requirements:
 
-## Running pipeline
+```bash
+pip install -r requirements.txt
+```
 
-While this environment is activated the user should place the "raw" files, this is 
-any .csv and .pdf file they want geocoded and classified into the directory `pipeline_steps/input_files/raw/`
+Run all commands from the `pipeline/` directory.
 
-These will then be converted to the correct file classified and geocoded and spat out
-again.
+## PDF to CSV conversion
 
-to run the pipeline the use the command
+PDF files need to be converted to CSV before they can be classified and
+geocoded. Choose the converter based on the PDF format:
 
-```python pipeline.py```
+- Use `pdf2csv_with_background.py` when the PDF has a background image.
+- Use `pdf2csv_withoutbg_051326.py` for newer-format PDFs that do not have a
+  background image.
+- Use `pdf2csv_withoutbackg_020426.py` for older-format PDFs that do not have a
+  background image.
 
-This will run all the steps and spit out a file in the `pipeline_steps` folder with the
-date ranging from the oldest death to the latest death as it name in year-month format. e.g.
-"2021-01-2024-02.csv" 
+If you are unsure whether a PDF has a background image, open the PDF and inspect
+whether the page content sits on top of a repeated image/background layer. PDFs
+with that background layer should use the background-aware converter.
 
-# Old Pipeline Usage
+If you run one of these converters manually, place the converted CSV in the raw
+input folder so `pipeline.py` can classify and geocode it like any other CSV:
 
-## Conversion to CSV
+```text
+pipeline_steps/input_files/raw/
+```
 
-If the file is initially a .pdf then it needs to be converted into a .csv file.
-This is done using the Pdf2csv.py script. Usage is here:
+## Running the pipeline
 
-```python pdf2csv.py {input_file}```
+Place any new raw `.pdf`, `.csv`, or `.xlsx` files in:
 
-This will output to wherever the input was with the same file name but as a csv.
+```text
+pipeline_steps/input_files/raw/
+```
 
-## Geolocation
+Then run:
 
-This process will take a long time with a large dataset, each row is about 0.7-1 seconds.
-Meaning a large batch will take a long time. 
+```bash
+python pipeline.py
+```
 
-input_file needs to be the path to the file (full path)
+The pipeline will:
 
-```python geocode.py {input_file}```
+1. Rename raw files to remove spaces.
+2. Convert PDFs to CSVs when needed.
+3. Classify records with the BERT model.
+4. Apply the NFLIS regex classification and general drug-use term regex capture.
+5. Standardize similar columns.
+6. Geocode the classified records.
+7. Append the results to the master geocoded output.
+8. Group the final data by location.
 
-This will output to the same location but geocoded will be appended to the file name.
+The final combined geocoded file is written under:
 
-## Classification
+```text
+pipeline_steps/input_files/geocoded/
+```
 
-This classifies the deaths in the file. This works with files where the cause of death
-is in columns either "CauseA, CauseB" type or in "Primary Cause, Secondary Cause" type.
+The sorted output is written under:
 
-location_of_file is simply the path to the file that needs to be classified.
+```text
+pipeline_steps/input_files/
+```
 
-model_type is the model trained this is either BERT or bioclinicalbert, the best performing
-is bioclinicalbert so should be called like so 
+## Caching and new files
 
-```python classify.py {location_of_file} {model_type}```
+`pipeline.py` caches work at the file level so the full pipeline does not need
+to rerun from scratch every time a new file is added.
 
-```python classify.py ./pipeline_steps/toclassify_geocoded.csv bioclinicalbert```
+Processed raw files are tracked in:
 
-This should output out our final result.
+```text
+pipeline_steps/logs/processed_files.txt
+```
+
+The pipeline also skips intermediate work when the expected output already
+exists. For example, it will not reconvert a PDF if its converted CSV already
+exists, will not reclassify a file if its `_classified.csv` already exists, and
+will not geocode a file if its `_geocoded.csv` already exists.
+
+To process additional data, add the new raw file to
+`pipeline_steps/input_files/raw/` and run `python pipeline.py` again. Existing
+cached files will be reused, and only new or missing work will be performed.
