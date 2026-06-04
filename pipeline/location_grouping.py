@@ -433,6 +433,8 @@ if __name__ == "__main__":
 
     gdf_merged = final_clean(gdf_merged)
 
+    gdf_merged = gdf_merged.sort_values(by="DeathDate_parsed", ascending=True)
+
     gdf_merged.drop(columns=["geometry", "DeathDate_parsed"]).to_csv(
         output_path, index=False
     )
