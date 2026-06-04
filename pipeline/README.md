@@ -96,3 +96,8 @@ will not geocode a file if its `_geocoded.csv` already exists.
 To process additional data, add the new raw file to
 `pipeline_steps/input_files/raw/` and run `python pipeline.py` again. Existing
 cached files will be reused, and only new or missing work will be performed.
+
+
+## NFLIS CITATION
+
+U.S. Drug Enforcement Administration, Diversion Control Division. (2017). Drug Enforcement Administration National Forensic Laboratory Information System: Drug calendar year 2017 data for the National Drug Early Warning System (NDEWS) (Version 1.0). Retrieved May 20, 2026,
