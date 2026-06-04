@@ -80,6 +80,7 @@ docs/_build/
 target/
 
 *.csv
+!NFLIS-Substances_Excel_20260520-222324728.csv
 # Jupyter Notebook
 .ipynb_checkpoints
 
