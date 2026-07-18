@@ -2,6 +2,7 @@ import os
 import glob
 import subprocess
 import logging
+import sys
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -17,6 +18,7 @@ CLASSIFIEDDIR = "./pipeline_steps/input_files/classified/"
 OUTPUTDIR = "./pipeline_steps/input_files"
 LOGFILE = "./pipeline_steps/logs/pipeline_summary.txt"
 MODEL_NAME = "bert_models/bioclinicalbert"
+AUDITDIR = "./pipeline_steps/audits"
 
 
 import os
@@ -482,8 +484,9 @@ def append_to_master_geocoded(new_geocoded_file):
     geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
     os.makedirs(geocode_dir, exist_ok=True)
     master_file = os.path.join(geocode_dir, "combined_classified_data_geocoded.csv")
+    master_existed = os.path.exists(master_file)
 
-    if os.path.exists(master_file):
+    if master_existed:
         master_df = pd.read_csv(master_file)
     else:
         # Rebuild from all individual geocoded files so deleting the master is safe
@@ -515,6 +518,41 @@ def append_to_master_geocoded(new_geocoded_file):
     # Save the updated master file
     combined_df.to_csv(master_file, index=False)
     print(f"Master geocoded data updated and saved to: {master_file}")
+
+    if master_existed:
+        write_stability_audit(master_df, master_file, new_geocoded_file, year=2025)
+
+
+def write_stability_audit(before_df, master_file, new_geocoded_file, year=2025):
+    os.makedirs(AUDITDIR, exist_ok=True)
+    basename = Path(new_geocoded_file).stem.replace("_geocoded", "")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    prefix = f"{timestamp}_{basename}_stability_{year}"
+    before_file = os.path.join(AUDITDIR, f"{prefix}_before_master.csv")
+
+    before_df.to_csv(before_file, index=False)
+    audit_script = Path(__file__).with_name("audit_stability.py")
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                str(audit_script),
+                "--old",
+                before_file,
+                "--new",
+                master_file,
+                "--year",
+                str(year),
+                "--outdir",
+                AUDITDIR,
+                "--prefix",
+                prefix,
+            ],
+            check=True,
+        )
+    finally:
+        if os.path.exists(before_file):
+            os.remove(before_file)
 
 
 def main():
