@@ -104,6 +104,8 @@ def bert_model_train(input_data: str, bert_type: str):
     train, val = train_test_split(train_val, random_state=42, test_size=0.2)
 
     test.to_pickle("../../data/test_set.pkl")
+    train.to_pickle("../../data/train_set.pkl")
+    val.to_pickle("../../data/val_set.pkl")
     print("Saved test set to the data directory")
 
     ### making sure dataset has only text columns and the outcome
@@ -197,10 +199,10 @@ def bert_model_train(input_data: str, bert_type: str):
 @app.command()
 def train(
     input_data: str = typer.Argument(
-        ..., help="Path to the input data file (pickle format)"
+        '../../data/processed_data/combined_data_removing_mislabels.pkl', help="Path to the input data file (pickle format)"
     ),
     bert_type: str = typer.Argument(
-        ..., help="Type of BERT model ('BERT' or 'Bio_ClinicalBERT')"
+        'Bio_ClinicalBERT', help="Type of BERT model ('BERT' or 'Bio_ClinicalBERT')"
     ),
 ):
     """
