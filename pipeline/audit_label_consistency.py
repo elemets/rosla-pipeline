@@ -150,6 +150,19 @@ CONVENTION_PATTERN = re.compile(
 )
 
 
+def _read_dataframe(path: Path) -> pd.DataFrame:
+    if path.suffix == ".pkl":
+        return pd.read_pickle(path)
+    return pd.read_csv(path)
+
+
+def _write_dataframe(df: pd.DataFrame, path: Path) -> None:
+    if path.suffix == ".pkl":
+        df.to_pickle(path)
+    else:
+        df.to_csv(path, index=False)
+
+
 def audit(
     csv_path: Path,
     text_col: str,
@@ -160,7 +173,8 @@ def audit(
     apply: bool = False,
 ) -> None:
     rc.SEARCH_FIELDS = [text_col]
-    df = pd.read_csv(csv_path)
+    df = _read_dataframe(csv_path)
+    df = df.reset_index(drop=True)
     patterns = rc.build_patterns(nflis_path)
     texts = df[text_col].astype(str).tolist()
 
@@ -414,8 +428,8 @@ def audit(
                     })
                     n_applied_derived += 1
 
-        corrected_path = out_dir / f"{stem}_corrected.csv"
-        out.to_csv(corrected_path, index=False)
+        corrected_path = out_dir / f"{stem}_corrected{csv_path.suffix}"
+        _write_dataframe(out, corrected_path)
 
         final_df = pd.DataFrame(applied_rows).sort_values(["row_index", "column"]).reset_index(drop=True) \
             if applied_rows else pd.DataFrame(columns=["row_index", "column", "direction", "matched_term", "reason", "text", "source"])
