@@ -116,6 +116,38 @@ NARCOTICS_OVERRIDE = {
     "diphenoxylate":    "Prescription.opioids",
 }
 
+# NFLIS-loaded substance names that need to be routed to a different column
+# than their category default, or dropped entirely (validated against
+# data/train_set.csv: generic "amphetamine" mentions are Others=1 95% of the
+# time, not Methamphetamine; "phentermine" shows no clean signal either way
+# and is excluded rather than guessed at).
+NFLIS_NAME_OVERRIDE = {
+    "amphetamine": "Others",
+    "mitragynine": "Others",
+    "7-hydroxymitragynine": "Others",
+    "mitragynine pseudoindoxyl": "Others",
+}
+# "phentermine": no clean signal for any column (0/2 in train_set.csv).
+# "brorphine": no clean signal for Others or Prescription.opioids (~20% either way).
+# "methorphan": ambiguous -- often a comma-tokenization artifact splitting
+# "dextromethorphan"/"levomethorphan" into DEXTRO/LEVO/METHORPHAN tokens;
+# NFLIS's standalone "Methorphan" entry can't be distinguished from that split.
+# Nitazene-family designer opioids: no clean signal for Others or
+# Prescription.opioids (~20-25% either way in train_set.csv).
+NFLIS_NAME_EXCLUSIONS = {
+    "phentermine", "brorphine", "methorphan",
+    "isotonitazene", "etonitazene", "metonitazene", "protonitazene",
+    "clonitazene", "butonitazene", "flunitazene",
+    "5-methyl etodesnitazene", "etodesnitazene", "metodesnitazene",
+    "protodesnitazene", "ethylene etonitazene", "ethyleneoxynitazene",
+    "methylenedioxynitazene", "n,n-dimethylamino etonitazene",
+    "n-desethyl isotonitazene", "n-piperidinyl etonitazene",
+    "n-pyrrolidino ethylene isotonitazene", "n-pyrrolidino isotonitazene",
+    "n-pyrrolidino etonitazene", "n-pyrrolidino metonitazene",
+    "n-pyrrolidino protonitazene", "n-desethyl protonitazene",
+    "n-desethyl etonitazene",
+}
+
 # ---------------------------------------------------------------------------
 # Hard-coded patterns: street names, abbreviations, clinical shorthand absent
 # from NFLIS but common in coroner text.  Each entry: (pattern_str, column).
@@ -138,8 +170,6 @@ ESSENTIAL_PATTERNS = [
     (r"\bmetethmphetamine\b",      "Methamphetamine"),
     (r"\bdextroamphetamine\b",     "Methamphetamine"),
     (r"\badderall\b",              "Methamphetamine"),
-    (r"\britalin\b",               "Methamphetamine"),
-    (r"\bmethylphenidate\b",       "Methamphetamine"),
     (r"\bvyvanse\b",               "Methamphetamine"),
     (r"\blisdexamfetamine\b",      "Methamphetamine"),
     # --- Heroin ---
@@ -174,6 +204,7 @@ ESSENTIAL_PATTERNS = [
     (r"\bchronic\s+alcohol\b",     "Alcohol"),
     (r"\balcoholic\s+cirrhosis\b", "Alcohol"),
     (r"\blaennec\b",               "Alcohol"),   # Laennec's cirrhosis = alcoholic cirrhosis
+    (r"\bethanolism\b",            "Alcohol"),
     # --- Prescription opioids ---
     (r"\bopioid\b",                "Prescription.opioids"),
     (r"\bopioids\b",               "Prescription.opioids"),
@@ -201,8 +232,8 @@ ESSENTIAL_PATTERNS = [
     (r"\bdemerol\b",               "Prescription.opioids"),
     (r"\bpropoxyphene\b",          "Prescription.opioids"),
     (r"\bdarvon\b",                "Prescription.opioids"),
-    (r"\bkratom\b",                "Prescription.opioids"),
-    (r"\bmitragynine\b",           "Prescription.opioids"),
+    (r"\bkratom\b",                "Others"),
+    (r"\bmitragynine\b",           "Others"),
     (r"\blevorphanol\b",           "Prescription.opioids"),
     (r"\bpentazocine\b",           "Prescription.opioids"),
     (r"\bbutorphanol\b",           "Prescription.opioids"),
@@ -210,11 +241,9 @@ ESSENTIAL_PATTERNS = [
     (r"\bdesomorphine\b",          "Prescription.opioids"),   # krokodil
     (r"\bkrokodil\b",              "Prescription.opioids"),
     (r"\bu-?47700\b",              "Prescription.opioids"),   # novel synthetic opioid
-    (r"\bisotonitazene\b",         "Prescription.opioids"),
-    (r"\betonitazene\b",           "Prescription.opioids"),
-    (r"\bmetonitazene\b",          "Prescription.opioids"),
-    (r"\bprotonitazene\b",         "Prescription.opioids"),
-    (r"\bnitazene\b",              "Prescription.opioids"),
+    # Nitazene-family designer opioids removed: train_set.csv shows no clean
+    # signal for either Prescription.opioids or Others (~20-25% precision on
+    # both), so we can't confidently route them without domain input.
     # --- Benzodiazepines ---
     (r"\bbenzodiazepine\b",        "Benzodiazepines"),
     (r"\bbenzodiazepines\b",       "Benzodiazepines"),
@@ -291,6 +320,31 @@ ESSENTIAL_PATTERNS = [
     (r"\bchoral\s+hydrate\b",      "Others"),
     (r"\bnitrous\s+oxide\b",       "Others"),
     (r"\bkhat\b",                  "Others"),
+    (r"\britalin\b",               "Others"),
+    (r"\bmethylphenidate\b",       "Others"),
+    (r"\bcitalopram\b",            "Others"),
+    (r"\bescitalopram\b",          "Others"),
+    (r"\bclozapine\b",             "Others"),
+    (r"\btrazodone\b",             "Others"),
+    (r"\bdiphenhydramine\b",       "Others"),
+    (r"\bamphetamines\b",          "Others"),   # plural, NFLIS only auto-loads singular
+    (r"\bolanzapine\b",            "Others"),
+    (r"\bfluoxetine\b",            "Others"),
+    (r"\bquetiapine\b",            "Others"),
+    (r"\bsertraline\b",            "Others"),
+    (r"\bduloxetine\b",            "Others"),
+    (r"\bmirtazapine\b",           "Others"),
+    (r"\bparoxetine\b",            "Others"),
+    (r"\bvenlafaxine\b",           "Others"),
+    (r"\btopiramate\b",            "Others"),
+    (r"\bdoxylamine\b",            "Others"),
+    (r"\blevetiracetam\b",         "Others"),
+    (r"\baripiprazole\b",          "Others"),
+    (r"\brisperidone\b",           "Others"),
+    (r"\blamotrigine\b",           "Others"),
+    (r"\bclonidine\b",             "Others"),
+    (r"\bbupropion\b",             "Others"),
+    (r"\bamitriptyline\b",         "Others"),
 ]
 
 # Generic death-certificate phrases that establish a drug death without naming
@@ -352,12 +406,15 @@ def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
             continue
         name = str(row["Substance Name"]).strip()
         if name and name.lower() not in ("nan", ""):
-            terms[col].append(name)
+            if name.lower() in NFLIS_NAME_EXCLUSIONS:
+                pass
+            else:
+                terms[NFLIS_NAME_OVERRIDE.get(name.lower(), col)].append(name)
         if pd.notna(row["Synonyms"]):
             for syn in str(row["Synonyms"]).split(";"):
                 s = syn.strip()
-                if s and s.lower() not in ("nan", ""):
-                    terms[col].append(s)
+                if s and s.lower() not in ("nan", "") and s.lower() not in NFLIS_NAME_EXCLUSIONS:
+                    terms[NFLIS_NAME_OVERRIDE.get(s.lower(), col)].append(s)
 
     for _, row in nflis[nflis["NFLIS Detailed Drug Category"] == "Narcotics"].iterrows():
         col = NARCOTICS_OVERRIDE.get(str(row["Substance Name"]).strip().lower())
