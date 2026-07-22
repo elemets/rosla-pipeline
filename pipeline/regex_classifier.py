@@ -146,13 +146,14 @@ NFLIS_NAME_EXCLUSIONS = {
     "n-pyrrolidino etonitazene", "n-pyrrolidino metonitazene",
     "n-pyrrolidino protonitazene", "n-desethyl protonitazene",
     "n-desethyl etonitazene",
-    # NFLIS lists the bare class word "Benzodiazepine" as if it were a
-    # specific substance name (Substance Name row, category
-    # "Benzodiazepines"). Excluded for the same reason as the generic-word
-    # exclusions above: 2% precision against Benzodiazepines specifically,
-    # verified against train_set_v2.csv.
-    "benzodiazepine",
 }
+# NOTE: NFLIS also lists the bare class word "Benzodiazepine" as if it were
+# a specific substance name (Substance Name row, category "Benzodiazepines").
+# This looked like a 2% precision leak against train_set_v2.csv, but that
+# turned out to be a train labeling gap (58 unambiguous "BENZODIAZEPINE
+# TOXICITY"-style records with Benzodiazepines=0, since fixed) -- 100%
+# precise after the fix, so it's deliberately NOT excluded here. See
+# ESSENTIAL_PATTERNS below.
 
 # ---------------------------------------------------------------------------
 # Hard-coded patterns: street names, abbreviations, clinical shorthand absent
@@ -212,14 +213,14 @@ ESSENTIAL_PATTERNS = [
     (r"\blaennec\b",               "Alcohol"),   # Laennec's cirrhosis = alcoholic cirrhosis
     (r"\bethanolism\b",            "Alcohol"),
     # --- Prescription opioids ---
-    # "opioid"/"opioids"/"opiate"/"opiates" deliberately excluded: generic
-    # class words, not named substances. Verified against train_set_v2.csv
+    # "opioid"/"opioids"/"opiate"/"opiates" deliberately excluded here:
+    # generic class words, not named substances -- a specific column should
+    # only match a specific drug. Verified against train_set_v2.csv
     # (2026-07): precision against Prescription.opioids specifically is
     # catastrophic (0-17%, n=10-72 each) -- these were a pre-existing bug,
     # silently injecting false positives via the OR-combine correction
-    # stage. "opioid"/"opioids" ARE still a reliable signal, but only for
-    # the Any Opioids AGGREGATE column (100% precision) -- see
-    # GENERAL_OPIOID_PATTERNS.
+    # stage. All four terms ARE a 100% reliable signal for the Any Opioids
+    # AGGREGATE column instead -- see GENERAL_OPIOID_PATTERNS.
     (r"\bopium\b",                 "Prescription.opioids"),
     (r"\bmorphine\b",              "Prescription.opioids"),
     (r"\bcodeine\b",               "Prescription.opioids"),
@@ -255,16 +256,22 @@ ESSENTIAL_PATTERNS = [
     # signal for either Prescription.opioids or Others (~20-25% precision on
     # both), so we can't confidently route them without domain input.
     # --- Benzodiazepines ---
-    # "benzodiazepine(s)"/"benzo(s)" deliberately excluded: generic class
-    # words, not named substances -- same bug class as the Prescription.
-    # opioids fix above. "benzodiazepine"/"benzodiazepines" verified against
-    # train_set_v2.csv: 2-5% precision (n=21-48). "benzo"/"benzos" have zero
-    # occurrences in train_set_v2.csv to verify empirically, but are the
-    # same kind of class-word shorthand, so excluded on the same principle.
-    # Unlike Prescription.opioids there's no separate "Any Benzodiazepines"
-    # aggregate column to redirect this evidence to (Benzodiazepines is both
-    # the specific and only column for this substance), so these are simply
-    # dropped rather than re-routed.
+    # "benzodiazepine(s)" initially looked like the same generic-class-word
+    # bug as Prescription.opioids (2-5% precision, n=21-48 in
+    # train_set_v2.csv), but turned out to be a train labeling gap instead:
+    # the low-precision records were unambiguous "BENZODIAZEPINE TOXICITY"-
+    # style cause-of-death text, not negated or ambiguous. Corrected in
+    # train_set_v2.csv (58 rows); 100% precise after the fix. Unlike
+    # "opioid" there's no aggregate column to disambiguate to here
+    # (Benzodiazepines is both the specific and only column for this
+    # substance), so once the labels are right, the generic term maps
+    # straight to it. "benzo"/"benzos" have zero occurrences in
+    # train_set_v2.csv to verify either way, but are the same kind of
+    # class-word shorthand, so included on the same principle.
+    (r"\bbenzodiazepine\b",        "Benzodiazepines"),
+    (r"\bbenzodiazepines\b",       "Benzodiazepines"),
+    (r"\bbenzo\b",                 "Benzodiazepines"),
+    (r"\bbenzos\b",                "Benzodiazepines"),
     (r"\bdiazepam\b",              "Benzodiazepines"),
     (r"\bvalium\b",                "Benzodiazepines"),
     (r"\balprazolam\b",            "Benzodiazepines"),
@@ -391,16 +398,21 @@ GENERAL_DRUG_PATTERNS = [
     r"\bchronic\s+intravenous\s+narcotism\b",
 ]
 
-# Generic "opioid(s)" mention with no specific drug named: sets Any Opioids
-# only, the same way GENERAL_DRUG_PATTERNS sets Any Drugs only. Validated
-# against data/train_set_v2.csv (2026-07): "opioid"/"opioids" is a 100%
-# consistent signal for Any Opioids=1 (81/81 records). Deliberately does
-# NOT include "opiate"/"opiates" -- that term is far less reliable in this
-# corpus (only 10/37 = 27% of records mentioning it have Any Opioids=1),
-# so treating it the same way would introduce real noise rather than
-# recovering a genuine convention.
+# Generic "opioid(s)"/"opiate(s)" mention with no specific drug named: sets
+# Any Opioids only, the same way GENERAL_DRUG_PATTERNS sets Any Drugs only.
+# Validated against data/train_set_v2.csv (2026-07): "opioid"/"opioids" is a
+# 100% consistent signal for Any Opioids=1 (81/81 records). "opiate"/
+# "opiates" initially looked much less reliable (10/37 = 27%), but that
+# turned out to be a train-set labeling gap, not a real difference in the
+# term's reliability -- the 27 "opiate"-mentioning records with
+# Any Opioids=0 were unambiguous opiate-toxicity/overdose cause-of-death
+# text (e.g. "COMPLICATIONS OF OPIATE TOXICITY" with every other substance
+# column also 0), not negated or ambiguous. Corrected in train_set_v2.csv;
+# "opiate"/"opiates" is 100% precise against Any Opioids after the fix,
+# same as "opioid"/"opioids".
 GENERAL_OPIOID_PATTERNS = [
     r"\bopioids?\b",
+    r"\bopiates?\b",
 ]
 
 # Pattern for detecting MDMA in cause-of-death text (used for Meth FP correction)
