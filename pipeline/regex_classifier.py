@@ -36,6 +36,7 @@ USAGE
 
 import re
 import argparse
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -116,43 +117,37 @@ NARCOTICS_OVERRIDE = {
     "diphenoxylate":    "Prescription.opioids",
 }
 
-# "Narcotic Analgesics" substance-name substrings (case-insensitive) that route
-# to Others instead of the category's default Prescription.opioids mapping.
-# These are illicit designer-opioid families (nitazenes, brorphine and its
-# analogues) or unscheduled herbal substances (kratom/mitragynine) that NFLIS
-# happens to file under "Narcotic Analgesics" alongside genuine prescription
-# drugs, but which aren't prescribable substances. On recoded_ext_test.csv, all
-# 10 nitazene-family and 5/6 mitragynine mentions are Others=1, and the
-# apparent Prescription.opioids signal in the remaining records is actually
-# coming from a separately-named real prescription opioid (methadone,
-# buprenorphine, oxycodone) in the same cause-of-death text, not the nitazene/
-# brorphine/mitragynine itself. Matched as a substring so every current and
-# future NFLIS variant (e.g. "N-Pyrrolidino Protonitazene", "5,6-dichloro
-# Brorphine (SR-14968)", "7-Hydroxymitragynine") is covered without needing
-# per-name entries.
-NARCOTIC_ANALGESICS_DESIGNER_OPIOID_OVERRIDE = ["nitazene", "brorphine", "mitragynine"]
-
-# Exact NFLIS substance-name overrides (case-insensitive, applied after the
-# category map) for individual substances whose category-default column
-# doesn't hold up against recoded_ext_test.csv. Bare "Amphetamine" (as opposed
-# to Methamphetamine, Dextroamphetamine, Lisdexamfetamine, etc.) shares its
-# NFLIS category with Methamphetamine but is a distinct, often-prescription
-# stimulant: all 13 recoded_ext_test.csv records mentioning amphetamine(s) are
-# Others=1, and only 4/13 are also Methamphetamine=1 -- driven by
-# methamphetamine being separately named in the same text, not by the bare
-# "amphetamine" mention.
+# NFLIS-loaded substance names that need to be routed to a different column
+# than their category default, or dropped entirely (validated against
+# data/train_set.csv: generic "amphetamine" mentions are Others=1 95% of the
+# time, not Methamphetamine; "phentermine" shows no clean signal either way
+# and is excluded rather than guessed at).
 NFLIS_NAME_OVERRIDE = {
     "amphetamine": "Others",
+    "mitragynine": "Others",
+    "7-hydroxymitragynine": "Others",
+    "mitragynine pseudoindoxyl": "Others",
 }
-
-# NFLIS substance names excluded entirely from pattern-building: generic or
-# ambiguous names that collide with unrelated clinical shorthand. "Methorphan"
-# is an NFLIS Narcotic Analgesics entry, but coroner text uses "DEXTRO/LEVO
-# METHORPHAN" as shorthand for dextromethorphan/levomethorphan toxicology-panel
-# metabolites (i.e. routine OTC cough-medicine screening), not opioid abuse --
-# 8/38 Prescription.opioids false positives on this branch's eval came from
-# this single collision.
-NFLIS_TERM_EXCLUSIONS = {"methorphan"}
+# "phentermine": no clean signal for any column (0/2 in train_set.csv).
+# "brorphine": no clean signal for Others or Prescription.opioids (~20% either way).
+# "methorphan": ambiguous -- often a comma-tokenization artifact splitting
+# "dextromethorphan"/"levomethorphan" into DEXTRO/LEVO/METHORPHAN tokens;
+# NFLIS's standalone "Methorphan" entry can't be distinguished from that split.
+# Nitazene-family designer opioids: no clean signal for Others or
+# Prescription.opioids (~20-25% either way in train_set.csv).
+NFLIS_NAME_EXCLUSIONS = {
+    "phentermine", "brorphine", "methorphan",
+    "isotonitazene", "etonitazene", "metonitazene", "protonitazene",
+    "clonitazene", "butonitazene", "flunitazene",
+    "5-methyl etodesnitazene", "etodesnitazene", "metodesnitazene",
+    "protodesnitazene", "ethylene etonitazene", "ethyleneoxynitazene",
+    "methylenedioxynitazene", "n,n-dimethylamino etonitazene",
+    "n-desethyl isotonitazene", "n-piperidinyl etonitazene",
+    "n-pyrrolidino ethylene isotonitazene", "n-pyrrolidino isotonitazene",
+    "n-pyrrolidino etonitazene", "n-pyrrolidino metonitazene",
+    "n-pyrrolidino protonitazene", "n-desethyl protonitazene",
+    "n-desethyl etonitazene",
+}
 
 # ---------------------------------------------------------------------------
 # Hard-coded patterns: street names, abbreviations, clinical shorthand absent
@@ -176,17 +171,8 @@ ESSENTIAL_PATTERNS = [
     (r"\bmetethmphetamine\b",      "Methamphetamine"),
     (r"\bdextroamphetamine\b",     "Methamphetamine"),
     (r"\badderall\b",              "Methamphetamine"),
-    (r"\britalin\b",               "Methamphetamine"),
-    (r"\bmethylphenidate\b",       "Others"),  # Ritalin: distinct stimulant, not
-                                    # methamphetamine (recoded_ext_test.csv: 0/1
-                                    # methylphenidate mentions were Meth-positive)
     (r"\bvyvanse\b",               "Methamphetamine"),
     (r"\blisdexamfetamine\b",      "Methamphetamine"),
-    # NOTE: a generic \bamphetamines?\b pattern was tried here and pulled from
-    # this branch after validation against recoded_ext_test.csv showed 0
-    # true positives against 8 false positives (0% precision) -- "amphetamine"
-    # names a distinct, often-prescription stimulant and isn't reliably
-    # methamphetamine-specific in ME phrasing.
     # --- Heroin ---
     (r"\bdiacetylmorphine\b",      "Heroin"),
     (r"\bdiamorphine\b",           "Heroin"),
@@ -218,19 +204,17 @@ ESSENTIAL_PATTERNS = [
     (r"\balcoholism\b",            "Alcohol"),
     (r"\bchronic\s+alcohol\b",     "Alcohol"),
     (r"\balcoholic\s+cirrhosis\b", "Alcohol"),
-    # NOTE: a standalone \blaennec\b pattern was tried here (Laennec's cirrhosis
-    # = alcoholic cirrhosis) and pulled after recoded_ext_test.csv showed 5/7
-    # bare "LAENNEC CIRRHOSIS" mentions (no acute alcohol-intoxication language)
-    # were recoded Alcohol=0 -- a chronic-disease sequela alone doesn't count as
-    # substance involvement under that convention. The 2 genuine cases both also
-    # say "CHRONIC ALCOHOLISM" and are still caught by \balcoholism\b above.
+    (r"\blaennec\b",               "Alcohol"),   # Laennec's cirrhosis = alcoholic cirrhosis
+    (r"\bethanolism\b",            "Alcohol"),
+    # --- Generic opioid terms -> Any Opioids (not prescription-specific) ---
+    # Training-set evidence: "opioid" 64/72, "opioids" 9/9, "opiate" 5/6 of the
+    # true-opioid rows are Any Opioids without Prescription.opioids. Mapping these
+    # to Prescription.opioids was a false positive.
+    (r"\bopioid\b",                "Any Opioids"),
+    (r"\bopioids\b",               "Any Opioids"),
+    (r"\bopiate\b",                "Any Opioids"),
+    (r"\bopiates\b",               "Any Opioids"),
     # --- Prescription opioids ---
-    # NOTE: generic \bopioid(s)?\b / \bopiate(s)?\b were moved to
-    # GENERAL_DRUG_PATTERNS below -- recoded_ext_test.csv reserves this column
-    # for a *named* prescription opioid; unspecified "OPIOID(S)" phrasing
-    # should only establish Any Drugs (20/38 false positives on this branch's
-    # eval came from these four generic patterns, with 0 recovered true
-    # positives that weren't already caught by a named-substance pattern).
     (r"\bopium\b",                 "Prescription.opioids"),
     (r"\bmorphine\b",              "Prescription.opioids"),
     (r"\bcodeine\b",               "Prescription.opioids"),
@@ -253,8 +237,8 @@ ESSENTIAL_PATTERNS = [
     (r"\bdemerol\b",               "Prescription.opioids"),
     (r"\bpropoxyphene\b",          "Prescription.opioids"),
     (r"\bdarvon\b",                "Prescription.opioids"),
-    (r"\bkratom\b",                "Others"),  # unscheduled herbal supplement,
-    (r"\bmitragynine\b",           "Others"),  # not an FDA-prescribable opioid
+    (r"\bkratom\b",                "Others"),
+    (r"\bmitragynine\b",           "Others"),
     (r"\blevorphanol\b",           "Prescription.opioids"),
     (r"\bpentazocine\b",           "Prescription.opioids"),
     (r"\bbutorphanol\b",           "Prescription.opioids"),
@@ -262,18 +246,9 @@ ESSENTIAL_PATTERNS = [
     (r"\bdesomorphine\b",          "Prescription.opioids"),   # krokodil
     (r"\bkrokodil\b",              "Prescription.opioids"),
     (r"\bu-?47700\b",              "Prescription.opioids"),   # novel synthetic opioid
-    # Nitazene-family designer opioids -> Others, not Prescription.opioids: on
-    # recoded_ext_test.csv, all 10 nitazene-mention records are Others=1, and
-    # Prescription.opioids=1 tracks 1:1 with a separately-named prescription
-    # opioid (methadone/buprenorphine/oxycodone) also present in the text, not
-    # the nitazene itself. See also the NFLIS-level override in build_patterns,
-    # which routes the full "Narcotic Analgesics" nitazene/brorphine family
-    # (many more variants than these five) to Others the same way.
-    (r"\bisotonitazene\b",         "Others"),
-    (r"\betonitazene\b",           "Others"),
-    (r"\bmetonitazene\b",          "Others"),
-    (r"\bprotonitazene\b",         "Others"),
-    (r"\bnitazene\b",              "Others"),
+    # Nitazene-family designer opioids removed: train_set.csv shows no clean
+    # signal for either Prescription.opioids or Others (~20-25% precision on
+    # both), so we can't confidently route them without domain input.
     # --- Benzodiazepines ---
     (r"\bbenzodiazepine\b",        "Benzodiazepines"),
     (r"\bbenzodiazepines\b",       "Benzodiazepines"),
@@ -350,47 +325,31 @@ ESSENTIAL_PATTERNS = [
     (r"\bchoral\s+hydrate\b",      "Others"),
     (r"\bnitrous\s+oxide\b",       "Others"),
     (r"\bkhat\b",                  "Others"),
-    # --- Curated from NFLIS "Other substances"/"Analgesics"/"Antidepressants"
-    # categories (otherwise skipped — see NFLIS_CATEGORY_MAP). Those categories
-    # mix genuine overdose-relevant substances with routine chronic-disease
-    # medications (insulin, statins, antihypertensives) and non-drug chemical
-    # names, so they aren't mapped wholesale: a blanket map tested against the
-    # epi project's dataset pulled ~150 routine-medication mentions (e.g.
-    # "INSULIN DEPENDENT DIABETES") and outright false positives (e.g.
-    # "EXPLOSION AT HEMP LABORATORY") into the substance-involved cohort. Each
-    # term below was manually verified to co-occur with toxicity/intoxication
-    # language in >90% of its matches, unlike excluded terms such as
-    # "warfarin" (71% routine-therapy mentions, e.g. "ON WARFARIN THERAPY").
+    (r"\britalin\b",               "Others"),
+    (r"\bmethylphenidate\b",       "Others"),
+    (r"\bcitalopram\b",            "Others"),
+    (r"\bescitalopram\b",          "Others"),
+    (r"\bclozapine\b",             "Others"),
+    (r"\btrazodone\b",             "Others"),
     (r"\bdiphenhydramine\b",       "Others"),
-    (r"\bacetaminophen\b",         "Others"),
-    (r"\bbupropion\b",             "Others"),
-    (r"\bamitriptyline\b",         "Others"),
-    (r"\bnortriptyline\b",         "Others"),
-    (r"\bdigoxin\b",               "Others"),
-    (r"\bcolchicine\b",            "Others"),
-    (r"\bloperamide\b",            "Others"),
-    (r"\bdapsone\b",               "Others"),
-    (r"\blithium\b",               "Others"),
-    (r"\bethylene\s+glycol\b",     "Others"),
-    (r"\bdifluoroethane\b",        "Others"),
-    (r"\bamantadine\b",            "Others"),
-    (r"\bmetaxalone\b",            "Others"),
-    # --- Second curation pass: additional psych/cardiac meds verified clean
-    # (>95% toxicity-language on manual review of every match in the epi
-    # project's dataset) ---
-    (r"\bvenlafaxine\b",           "Others"),
+    (r"\bamphetamines\b",          "Others"),   # plural, NFLIS only auto-loads singular
+    (r"\bolanzapine\b",            "Others"),
+    (r"\bfluoxetine\b",            "Others"),
     (r"\bquetiapine\b",            "Others"),
     (r"\bsertraline\b",            "Others"),
-    (r"\bpaliperidone\b",          "Others"),
-    (r"\btamsulosin\b",            "Others"),
-    (r"\bverapamil\b",             "Others"),
-    (r"\bamlodipine\b",            "Others"),
-    # --- Third curation pass ---
-    (r"\bmetoprolol\b",            "Others"),
+    (r"\bduloxetine\b",            "Others"),
+    (r"\bmirtazapine\b",           "Others"),
+    (r"\bparoxetine\b",            "Others"),
+    (r"\bvenlafaxine\b",           "Others"),
+    (r"\btopiramate\b",            "Others"),
+    (r"\bdoxylamine\b",            "Others"),
     (r"\blevetiracetam\b",         "Others"),
-    (r"\bfelodipine\b",            "Others"),
-    (r"\bmetformin\b",             "Others"),
-    (r"\bnitrate[s]?\b",           "Others"),  # sodium/potassium nitrate self-poisoning
+    (r"\baripiprazole\b",          "Others"),
+    (r"\brisperidone\b",           "Others"),
+    (r"\blamotrigine\b",           "Others"),
+    (r"\bclonidine\b",             "Others"),
+    (r"\bbupropion\b",             "Others"),
+    (r"\bamitriptyline\b",         "Others"),
 ]
 
 # Generic death-certificate phrases that establish a drug death without naming
@@ -419,14 +378,6 @@ GENERAL_DRUG_PATTERNS = [
     r"\bconsequences\s+of\s+drug\s+abuse\b",
     r"\boverdose\s+of\s+unkn[o0]wn\s+drug\b",
     r"\bchronic\s+intravenous\s+narcotism\b",
-    # Unspecified opioid class language ("OPIOID(S)", "OPIATE(S)") without a
-    # named substance. Moved here from Prescription.opioids: recoded_ext_test.csv
-    # only sets that column for a named drug, so these established Any Drugs
-    # (and, transitively, Any Opioids via a co-occurring named opioid) but not
-    # Prescription.opioids itself -- 20/38 false positives on this branch's eval
-    # came from routing these straight to Prescription.opioids.
-    r"\bopioids?\b",
-    r"\bopiates?\b",
 ]
 
 # Pattern for detecting MDMA in cause-of-death text (used for Meth FP correction)
@@ -443,38 +394,10 @@ def _escape_term(term: str) -> str:
     return re.sub(r"\\ ", r"\\s+", escaped)  # allow flexible whitespace
 
 
-# Leading chemical locant prefix, e.g. "3,4-" in "3,4-methylenedioxymethamphetamine"
-# or "1,2,3,4-" in "1,2,3,4-Tetrahydroharmine". ME cause-of-death text is written
-# by certifiers, not chemists, and routinely drops these locants even when the
-# NFLIS synonym carries them (e.g. text says "METHYLENEDIOXYMETHAMPHETAMINE", the
-# NFLIS synonym is "3,4-methylenedioxymethamphetamine") — so terms are also
-# indexed with the prefix stripped.
-_LOCANT_PREFIX_RE = re.compile(r"^\d+(?:'?,\d+)*'?-\s*")
-
-# Minimum length for a locant-stripped remainder to be indexed. Many short NFLIS
-# codes (e.g. "3-MMC", "2,3-MDMA") are themselves abbreviations where the leading
-# digit is a scheduling/isomer marker, not a stripped-off locant on a full name —
-# stripping those yields dangerously generic 3-4 letter fragments ("MMC", "CBC",
-# "AI", ...). Genuine full chemical names run much longer, so a length floor
-# separates "locant on a full name" from "abbreviation with a leading digit".
-_LOCANT_STRIP_MIN_LEN = 8
-
-
-def _strip_locant_prefix(term: str) -> str | None:
-    """Return term with a leading numeric locant prefix removed, or None if the
-    term has no such prefix or the remainder is too short to index safely."""
-    term = term.strip()
-    stripped = _LOCANT_PREFIX_RE.sub("", term)
-    if stripped != term and len(stripped) >= _LOCANT_STRIP_MIN_LEN:
-        return stripped
-    return None
-
-
 def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
     """
     Build compiled regex patterns per classification column from three sources:
-      1. NFLIS substance names and synonyms (loaded from nflis_path), each also
-         indexed with any leading locant prefix stripped (see _strip_locant_prefix)
+      1. NFLIS substance names and synonyms (loaded from nflis_path)
       2. Hard-coded ESSENTIAL_PATTERNS (street names, clinical terms)
       3. Generic drug-death phrases that set Any Drugs only
     Returns {column_name: compiled_re.Pattern}.
@@ -482,40 +405,28 @@ def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
     nflis = pd.read_csv(nflis_path, encoding="utf-8-sig")
     terms: dict[str, list[str]] = {col: [] for col in SUBSTANCE_COLS}
 
-    def _add(col: str, term: str) -> None:
-        terms[col].append(term)
-        stripped = _strip_locant_prefix(term)
-        if stripped:
-            terms[col].append(stripped)
-
     for _, row in nflis.iterrows():
         col = NFLIS_CATEGORY_MAP.get(row["NFLIS Detailed Drug Category"])
         if col is None:
             continue
         name = str(row["Substance Name"]).strip()
-        if name.lower() in NFLIS_TERM_EXCLUSIONS:
-            continue
-        if name.lower() in NFLIS_NAME_OVERRIDE:
-            col = NFLIS_NAME_OVERRIDE[name.lower()]
-        elif (
-            row["NFLIS Detailed Drug Category"] == "Narcotic Analgesics"
-            and any(s in name.lower() for s in NARCOTIC_ANALGESICS_DESIGNER_OPIOID_OVERRIDE)
-        ):
-            col = "Others"
         if name and name.lower() not in ("nan", ""):
-            _add(col, name)
+            if name.lower() in NFLIS_NAME_EXCLUSIONS:
+                pass
+            else:
+                terms[NFLIS_NAME_OVERRIDE.get(name.lower(), col)].append(name)
         if pd.notna(row["Synonyms"]):
             for syn in str(row["Synonyms"]).split(";"):
                 s = syn.strip()
-                if s and s.lower() not in ("nan", "") and s.lower() not in NFLIS_TERM_EXCLUSIONS:
-                    _add(col, s)
+                if s and s.lower() not in ("nan", "") and s.lower() not in NFLIS_NAME_EXCLUSIONS:
+                    terms[NFLIS_NAME_OVERRIDE.get(s.lower(), col)].append(s)
 
     for _, row in nflis[nflis["NFLIS Detailed Drug Category"] == "Narcotics"].iterrows():
         col = NARCOTICS_OVERRIDE.get(str(row["Substance Name"]).strip().lower())
         if col:
             terms[col].append(str(row["Substance Name"]).strip())
 
-    essential_by_col: dict[str, list[str]] = {col: [] for col in SUBSTANCE_COLS}
+    essential_by_col: dict[str, list[str]] = defaultdict(list)
     for pattern_str, col in ESSENTIAL_PATTERNS:
         essential_by_col[col].append(pattern_str)
 
@@ -531,6 +442,12 @@ def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
         unique = [p for p in all_parts if not (p in seen or seen.add(p))]
         if unique:
             compiled[col] = re.compile("|".join(unique), re.IGNORECASE)
+
+    # Generic opioid terms set Any Opioids directly (no specific subtype).
+    if essential_by_col.get("Any Opioids"):
+        compiled["Any Opioids"] = re.compile(
+            "|".join(essential_by_col["Any Opioids"]), re.IGNORECASE
+        )
 
     compiled["Any Drugs"] = re.compile("|".join(GENERAL_DRUG_PATTERNS), re.IGNORECASE)
     return compiled
@@ -595,13 +512,6 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
     Stage 3 — Generic drug-death phrases:
         Set Any Drugs for broad phrases such as "drug use" or "multiple drug
         intoxication" without assigning a substance column.
-
-    Any Drugs and Any Opioids are both derived columns (Any Drugs from
-    Number_Substances > 0; Any Opioids from Heroin/Fentanyl/Prescription.opioids)
-    that discard the input's own value by default. Both are OR-combined with
-    their original input value so a BERT true positive whose text-level signal
-    the regex/derivation can't see (e.g. Any Opioids predicted directly by the
-    model without one of the three feeder columns firing) isn't lost.
     """
     out = df.copy()
 
@@ -619,6 +529,12 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
         np.zeros(len(out), dtype=int),
     )
     n_generic_any = int(any_drug_regex.sum())
+    # Generic opioid terms ("opioid", "opiate", …) set Any Opioids directly
+    # without implying a specific subtype (Heroin/Fentanyl/Prescription.opioids).
+    any_opioid_regex = regex_flags.get(
+        "Any Opioids",
+        np.zeros(len(out), dtype=int),
+    )
 
     # Compute MDMA mask on the ORIGINAL BERT flags before any modification.
     # Condition: BERT fired (=1), regex did not (=0), text contains MDMA term.
@@ -676,23 +592,11 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
             f"{sign}{after_any - before_any:>5,}  {after_any:>7,}"
         )
         print(f"  Generic drug-death phrase matches: {n_generic_any:,}")
-    original_any_opioids = (
-        out["Any Opioids"].fillna(0).astype(int).values
-        if "Any Opioids" in out.columns
-        else np.zeros(len(out), dtype=int)
-    )
-    out["Any Opioids"] = (
-        (subst[["Heroin", "Fentanyl", "Prescription.opioids"]].sum(axis=1) > 0).astype(int).values |
-        original_any_opioids
+    out["Any Opioids"]       = (
+        (subst[["Heroin", "Fentanyl", "Prescription.opioids"]].sum(axis=1) > 0).values |
+        out["Any Opioids"].fillna(0).astype(int).values |
+        any_opioid_regex
     ).astype(int)
-    if verbose:
-        before_any_opioids = int(original_any_opioids.sum())
-        after_any_opioids = int(out["Any Opioids"].sum())
-        sign = "+" if after_any_opioids >= before_any_opioids else ""
-        print(
-            f"  {'Any Opioids':<25} {before_any_opioids:>7,}  "
-            f"{sign}{after_any_opioids - before_any_opioids:>5,}  {after_any_opioids:>7,}"
-        )
 
     return out
 

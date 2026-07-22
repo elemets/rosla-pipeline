@@ -18,7 +18,14 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    hamming_loss,
+)
 
 from classify import TextDataset, apply_regex_classifier, create_text_col
 
@@ -44,7 +51,10 @@ LABEL_RENAMES = {
 
 
 def load_external(input_path: Path):
-    df = pd.read_excel(input_path).rename(columns=LABEL_RENAMES)
+    try:
+        df = pd.read_excel(input_path).rename(columns=LABEL_RENAMES)
+    except:
+        df = pd.read_csv(input_path).rename(columns=LABEL_RENAMES)
     if "Any Drugs" not in df.columns:
         old = pd.read_csv(
             ROOT / "data" / "external_test.csv",
@@ -53,7 +63,7 @@ def load_external(input_path: Path):
         df = df.merge(old, on="Case.Number", how="left")
         df["Any Drugs"] = df["Any Drugs"].fillna(0).astype(int)
     y_true = df[DRUG_COLS].astype(int).reset_index(drop=True)
-    feats = df.drop(columns=DRUG_COLS).rename(columns={"Combined_text": "CauseA"})
+    feats = df.drop(columns=DRUG_COLS).rename(columns={"text": "CauseA"})
     feats = create_text_col(feats).reset_index(drop=True)
     return feats, y_true
 
@@ -89,9 +99,28 @@ def per_class_metrics(y_true: pd.DataFrame, y_pred: pd.DataFrame) -> pd.DataFram
     return pd.DataFrame(rows).T
 
 
+def macro_metrics(y_true: pd.DataFrame, y_pred: pd.DataFrame, probs=None) -> dict:
+    metrics = {
+        "Hamming Loss": hamming_loss(y_true, y_pred),
+        "Accuracy": accuracy_score(y_true, y_pred),
+        "Precision": precision_score(y_true, y_pred, average="macro", zero_division=0),
+        "Recall": recall_score(y_true, y_pred, average="macro", zero_division=0),
+        "Macro F1 Score": f1_score(y_true, y_pred, average="macro", zero_division=0),
+    }
+    if probs is not None:
+        metrics["Macro AUC ROC"] = roc_auc_score(y_true, probs, average="macro")
+    return metrics
+
+
+def print_macro(title: str, metrics: dict):
+    print(f"\n=== {title} ===")
+    for name, value in metrics.items():
+        print(f"{name}: {value}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", default=str(ROOT / "data" / "external_updated.xlsx"))
+    parser.add_argument("--input", default=str(ROOT / "data" / "recoded_ext_test_v2.csv"))
     parser.add_argument("--model", default="bioclinicalbert")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument(
@@ -120,6 +149,9 @@ def main():
     comparison = m_before.join(m_after, lsuffix="_before", rsuffix="_after")
     comparison["accuracy_delta"] = comparison["accuracy_after"] - comparison["accuracy_before"]
     comparison["f1_delta"] = comparison["f1_after"] - comparison["f1_before"]
+
+    print_macro("BERT only (before regex) - macro metrics", macro_metrics(y_true, before, probs))
+    print_macro("BERT + regex (after) - macro metrics", macro_metrics(y_true, after))
 
     print("\n=== BERT only (before regex) ===")
     print(m_before.round(4))
