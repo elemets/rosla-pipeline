@@ -63,27 +63,43 @@ files for a human to look at before any labels are changed:
                                      though it's excluded from flagging
                                      against the specific substance column.
                                      Low precision means the opposite: do
-                                     NOT encode it, it isn't reliable (e.g.
-                                     "opiate" is only 27% precise against
-                                     Any Opioids in train_set_v2.csv, vs.
-                                     "opioid" at 100% -- same convention
-                                     word family, very different signal).
-  8. <stem>_convention_pattern_leak.csv - structural check on
-                                     regex_classifier.py's patterns, not the
-                                     dataset: flags any SUBSTANCE_COLS
+                                     NOT encode it as-is -- but treat it as a
+                                     lead, not a verdict. "opiate" first
+                                     looked only 27% precise against
+                                     Any Opioids in train_set_v2.csv (vs.
+                                     "opioid" at 100%), which turned out to
+                                     be a train labeling gap, not a real
+                                     difference in the term -- the low-
+                                     precision records were unambiguous
+                                     opiate-toxicity cause-of-death text
+                                     with every other substance column also
+                                     0. After fixing those 27 labels,
+                                     "opiate" is 100% precise too. Low
+                                     precision here is a prompt to go read
+                                     the actual [3] vocab_gap-style records
+                                     behind it, not just an exclusion rule.
+  8. <stem>_convention_pattern_leak.csv - checks every SUBSTANCE_COLS
                                      pattern that matches a bare
-                                     CONVENTION_TERMS word directly (a
-                                     specific-substance column should only
-                                     ever match named substances). Caught a
-                                     real pre-existing bug this way:
-                                     "opioid"/"opioids"/"opiate"/"opiates"
-                                     were mapped straight to
-                                     Prescription.opioids in
-                                     ESSENTIAL_PATTERNS (0-17% precision
-                                     there) despite being excluded from
-                                     label_review as generic -- the
-                                     exclusion hid it from review instead of
-                                     catching it.
+                                     CONVENTION_TERMS word directly against
+                                     its actual precision. verdict=="leak"
+                                     (low precision) is a real bug in
+                                     regex_classifier.py -- caught the
+                                     original "opioid"/"opiate" ->
+                                     Prescription.opioids leak this way
+                                     (0-17% precision). verdict==
+                                     "legitimate" (high precision) means the
+                                     generic term IS reliable for that
+                                     specific column and probably belongs in
+                                     ESSENTIAL_PATTERNS -- caught
+                                     "benzodiazepine"/"benzodiazepines" this
+                                     way, which looked like the same bug
+                                     (2-5% precision) but was actually a
+                                     train labeling gap (58 unambiguous
+                                     "BENZODIAZEPINE TOXICITY"-style records
+                                     with Benzodiazepines=0). Low precision
+                                     from this check is a lead to
+                                     investigate, not an automatic verdict
+                                     either way.
 
 Usage (run from the repo root, as a module -- running it as a bare script
 puts pipeline/ first on sys.path and collides with pipeline/pipeline.py):
@@ -445,6 +461,12 @@ def audit(
     # from label_review as generic. This check catches that class of bug on
     # every future audit run, on any dataset, regardless of which specific
     # terms end up in CONVENTION_TERMS later.
+    # A convention term matching a specific column isn't automatically a
+    # bug -- it's only a bug if the term ISN'T actually reliable evidence
+    # for that column. High precision here means the term was wrongly
+    # excluded from ESSENTIAL_PATTERNS (or is a train labeling gap, like
+    # "opiate"/"benzodiazepine" turned out to be); low precision means the
+    # opposite, a real leak like the original Prescription.opioids bug.
     leak_rows = []
     for term in CONVENTION_TERMS:
         for col in rc.SUBSTANCE_COLS:
@@ -457,12 +479,22 @@ def audit(
             term_pat = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
             match_idx = [i for i, t in enumerate(texts) if term_pat.search(t)]
             tp = sum(1 for i in match_idx if labels[col][i] == 1) if match_idx else 0
+            precision = tp / len(match_idx) if match_idx else None
+            is_leak = precision is not None and precision < precision_threshold and len(match_idx) >= min_support
             leak_rows.append({
                 "convention_term": term, "leaking_into_column": col,
                 "n_matches_in_dataset": len(match_idx), "tp": tp,
-                "precision": round(tp / len(match_idx), 3) if match_idx else None,
-                "note": f"'{term}' is a generic class word but {col}'s compiled pattern matches "
-                        f"it directly -- check ESSENTIAL_PATTERNS / NFLIS synonyms for {col}",
+                "precision": round(precision, 3) if precision is not None else None,
+                "verdict": "leak" if is_leak else "legitimate",
+                "note": (
+                    f"'{term}' is a generic class word but {col}'s compiled pattern matches it "
+                    f"directly, AND precision is only {round(precision, 3) if precision is not None else 'n/a'} "
+                    f"-- check ESSENTIAL_PATTERNS / NFLIS synonyms for {col}"
+                    if is_leak else
+                    f"'{term}' matches {col} directly, but precision is "
+                    f"{round(precision, 3) if precision is not None else 'n/a'} -- reliable enough that "
+                    f"this is very likely intentional (or check for a train labeling gap if it wasn't)"
+                ),
             })
     leak_df = pd.DataFrame(leak_rows)
     leak_path = out_dir / f"{stem}_convention_pattern_leak.csv"
@@ -571,9 +603,11 @@ def audit(
     print(f"\n[6] Negation-scope review: {len(neg_df)} records where every match is negated -> {neg_path}")
     n_recommend = int(agg_signal_df["recommend_encoding"].sum()) if len(agg_signal_df) else 0
     print(f"\n[7] Convention-term aggregate signal: {n_recommend}/{len(agg_signal_df)} terms recommended for encoding -> {agg_signal_path}")
-    print(f"\n[8] Convention-term pattern leaks: {len(leak_df)} found -> {leak_path}")
-    if len(leak_df):
-        print("    ^ these are bugs in regex_classifier.py itself, not the dataset -- fix the patterns.")
+    n_leak = int((leak_df["verdict"] == "leak").sum()) if len(leak_df) else 0
+    n_legit = len(leak_df) - n_leak
+    print(f"\n[8] Convention-term pattern leaks: {n_leak} real bugs, {n_legit} legitimate (verified reliable) -> {leak_path}")
+    if n_leak:
+        print("    ^ the 'leak' rows are bugs in regex_classifier.py itself, not the dataset -- fix the patterns.")
     if apply:
         print(f"\n[apply] {n_applied_direct} direct + {n_applied_derived} derived corrections applied "
               f"({n_skipped_negated} label_review candidates skipped, negated) ->")
