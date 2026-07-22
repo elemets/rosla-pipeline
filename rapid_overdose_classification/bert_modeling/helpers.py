@@ -10,6 +10,7 @@ from transformers import EvalPrediction
 from rapid_overdose_classification.bert_modeling.constants import (
     drug_cols,
 )
+from pipeline.regex_classifier import clean_bert_text
 
 
 def multi_label_metrics(predictions, labels, threshold=0.5):
@@ -61,7 +62,7 @@ class TokenizeFunc:
     def tokenize_function(self, drug_data):
 
         encoded_text = self.tokenizer(
-            drug_data["text"], padding="max_length", truncation=True
+            clean_bert_text(drug_data["text"]), padding="max_length", truncation=True
         )
 
         encoded_text["labels"] = torch.FloatTensor(
