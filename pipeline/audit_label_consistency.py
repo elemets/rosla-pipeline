@@ -50,6 +50,40 @@ files for a human to look at before any labels are changed:
                                      history of opioid abuse"). Heuristic
                                      (word-window based) -- review by hand,
                                      this is not a hard rule like #4.
+  7. <stem>_convention_aggregate_signal.csv - for each CONVENTION_TERMS
+                                     entry that maps to a derived/aggregate
+                                     column (CONVENTION_AGGREGATE_TARGETS,
+                                     e.g. "opioid" -> Any Opioids), its
+                                     precision against that column. High
+                                     precision (>= --precision-threshold)
+                                     means the term is a reliable enough
+                                     signal to encode as a generic regex
+                                     rule (like GENERAL_DRUG_PATTERNS ->
+                                     Any Drugs in regex_classifier.py) even
+                                     though it's excluded from flagging
+                                     against the specific substance column.
+                                     Low precision means the opposite: do
+                                     NOT encode it, it isn't reliable (e.g.
+                                     "opiate" is only 27% precise against
+                                     Any Opioids in train_set_v2.csv, vs.
+                                     "opioid" at 100% -- same convention
+                                     word family, very different signal).
+  8. <stem>_convention_pattern_leak.csv - structural check on
+                                     regex_classifier.py's patterns, not the
+                                     dataset: flags any SUBSTANCE_COLS
+                                     pattern that matches a bare
+                                     CONVENTION_TERMS word directly (a
+                                     specific-substance column should only
+                                     ever match named substances). Caught a
+                                     real pre-existing bug this way:
+                                     "opioid"/"opioids"/"opiate"/"opiates"
+                                     were mapped straight to
+                                     Prescription.opioids in
+                                     ESSENTIAL_PATTERNS (0-17% precision
+                                     there) despite being excluded from
+                                     label_review as generic -- the
+                                     exclusion hid it from review instead of
+                                     catching it.
 
 Usage (run from the repo root, as a module -- running it as a bare script
 puts pipeline/ first on sys.path and collides with pipeline/pipeline.py):
@@ -117,6 +151,23 @@ CONVENTION_TERMS = {
 # Columns "Any Opioids" is defined as the OR of (regex_classifier.py's
 # apply_corrections, Stage: recompute derived columns).
 OPIOID_COMPONENT_COLS = ["Heroin", "Fentanyl", "Prescription.opioids"]
+
+# Some CONVENTION_TERMS don't name a specific substance, but might still be
+# a reliable signal for a DERIVED/aggregate column -- e.g. "opioid" doesn't
+# say which opioid, but could still reliably predict Any Opioids=1. This is
+# a real, encodable pattern (see GENERAL_DRUG_PATTERNS -> Any Drugs in
+# regex_classifier.py) as long as the term's precision against the
+# aggregate column is high; if it's not, encoding it would introduce noise
+# instead of recovering a genuine convention. Maps term -> aggregate column
+# to check. Not every CONVENTION_TERMS entry has an aggregate to check
+# against (e.g. "benzodiazepine" maps to the Benzodiazepines *substance*
+# column, not a separate aggregate -- so it isn't listed here).
+CONVENTION_AGGREGATE_TARGETS = {
+    "opioid": "Any Opioids",
+    "opioids": "Any Opioids",
+    "opiate": "Any Opioids",
+    "opiates": "Any Opioids",
+}
 
 # Heuristic negation triggers, checked within the word window preceding a
 # match. Deliberately excludes bare "no"/"not"/"non" -- in death-certificate
@@ -352,6 +403,71 @@ def audit(
     neg_path = out_dir / f"{stem}_negation_review.csv"
     neg_df.to_csv(neg_path, index=False)
 
+    # --- 7. Convention-term vs. aggregate-column signal ---------------------
+    agg_signal_rows = []
+    for term, agg_col in CONVENTION_AGGREGATE_TARGETS.items():
+        if agg_col not in df.columns:
+            continue
+        pat = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
+        match_idx = [i for i, t in enumerate(texts) if pat.search(t)]
+        if not match_idx:
+            continue
+        agg_vals = df[agg_col].fillna(0).astype(int).values
+        tp = sum(1 for i in match_idx if agg_vals[i] == 1)
+        fp = len(match_idx) - tp
+        precision = tp / len(match_idx)
+        recommend = precision >= precision_threshold and len(match_idx) >= min_support
+        agg_signal_rows.append({
+            "term": term, "aggregate_column": agg_col,
+            "n_matches": len(match_idx), "tp": tp, "fp": fp,
+            "precision": round(precision, 3),
+            "recommend_encoding": recommend,
+            "note": (
+                f"precision >= {precision_threshold} -- reliable enough to encode as a "
+                f"generic pattern (like GENERAL_DRUG_PATTERNS -> Any Drugs)"
+                if recommend else
+                "precision too low / support too thin -- do NOT encode as a blanket rule, "
+                "this term is not a reliable signal for the aggregate column"
+            ),
+        })
+    agg_signal_df = pd.DataFrame(agg_signal_rows)
+    agg_signal_path = out_dir / f"{stem}_convention_aggregate_signal.csv"
+    agg_signal_df.to_csv(agg_signal_path, index=False)
+
+    # --- 8. Convention-term leak into a specific-substance pattern ---------
+    # Structural check on regex_classifier.py itself, not the dataset: a
+    # SUBSTANCE_COLS pattern (Methamphetamine, Heroin, ... Prescription.
+    # opioids, ...) should only ever match NAMED substances. If it also
+    # matches a bare CONVENTION_TERMS word, that's the exact bug just found
+    # in ESSENTIAL_PATTERNS: "opioid"/"opioids"/"opiate"/"opiates" were
+    # mapped straight to Prescription.opioids (0-17% precision there,
+    # verified against train_set_v2.csv) despite being deliberately excluded
+    # from label_review as generic. This check catches that class of bug on
+    # every future audit run, on any dataset, regardless of which specific
+    # terms end up in CONVENTION_TERMS later.
+    leak_rows = []
+    for term in CONVENTION_TERMS:
+        for col in rc.SUBSTANCE_COLS:
+            pat = patterns.get(col)
+            if pat is None:
+                continue
+            m = pat.search(term)
+            if not m:
+                continue
+            term_pat = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
+            match_idx = [i for i, t in enumerate(texts) if term_pat.search(t)]
+            tp = sum(1 for i in match_idx if labels[col][i] == 1) if match_idx else 0
+            leak_rows.append({
+                "convention_term": term, "leaking_into_column": col,
+                "n_matches_in_dataset": len(match_idx), "tp": tp,
+                "precision": round(tp / len(match_idx), 3) if match_idx else None,
+                "note": f"'{term}' is a generic class word but {col}'s compiled pattern matches "
+                        f"it directly -- check ESSENTIAL_PATTERNS / NFLIS synonyms for {col}",
+            })
+    leak_df = pd.DataFrame(leak_rows)
+    leak_path = out_dir / f"{stem}_convention_pattern_leak.csv"
+    leak_df.to_csv(leak_path, index=False)
+
     # --- apply: auto-apply the judgment-free subset of findings -----------
     corrected_path = final_corrections_path = None
     n_applied_direct = n_applied_derived = n_skipped_negated = 0
@@ -453,6 +569,11 @@ def audit(
         print("\n[4] Derived-column consistency: skipped (Any Opioids / Any Drugs columns not present)")
     print(f"\n[5] Duplicate-text label conflicts: {group_id} conflicting groups -> {dup_path}")
     print(f"\n[6] Negation-scope review: {len(neg_df)} records where every match is negated -> {neg_path}")
+    n_recommend = int(agg_signal_df["recommend_encoding"].sum()) if len(agg_signal_df) else 0
+    print(f"\n[7] Convention-term aggregate signal: {n_recommend}/{len(agg_signal_df)} terms recommended for encoding -> {agg_signal_path}")
+    print(f"\n[8] Convention-term pattern leaks: {len(leak_df)} found -> {leak_path}")
+    if len(leak_df):
+        print("    ^ these are bugs in regex_classifier.py itself, not the dataset -- fix the patterns.")
     if apply:
         print(f"\n[apply] {n_applied_direct} direct + {n_applied_derived} derived corrections applied "
               f"({n_skipped_negated} label_review candidates skipped, negated) ->")
