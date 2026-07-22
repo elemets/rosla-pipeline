@@ -16,6 +16,7 @@ import torch
 from datetime import datetime
 import json
 import time
+from pipeline.regex_classifier import clean_bert_text
 
 app = typer.Typer()
 
@@ -34,7 +35,7 @@ def predict_bert(input_data: str, model_type: str, text_col: str):
     """
     # Load data to do the prediction on
     pred_df = pd.read_csv(input_data)
-    texts = pred_df[text_col].tolist()
+    texts = pred_df[text_col].apply(clean_bert_text).tolist()
     tokenizer = AutoTokenizer.from_pretrained(f"{MODEL_PATH}{model_type}")
 
     # Process texts in batches to avoid overflow

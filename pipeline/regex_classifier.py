@@ -454,6 +454,41 @@ def normalize_text(value) -> str:
     return re.sub(r"\bNULL\b", " ", s, flags=re.IGNORECASE)
 
 
+def clean_bert_text(value) -> str:
+    """Normalize free text before it's tokenized for the multi-label BERT
+    classifier. Single choke point for every quirk found in the 2026-07
+    train/test formatting investigation:
+
+      - literal "NULL" placeholder tokens (raw field concatenation used to
+        build recoded_ext_test.csv leaves these in when a field is empty)
+      - tab characters (used in recoded_ext_test.csv to join Primary.Cause
+        and Secondary.Cause)
+      - "comma after every single word" -- an artifact of whatever built
+        combined_data_removing_mislabels.pkl's text column, NOT a real
+        punctuation convention and NOT what create_text_col() below
+        produces (which only joins CAUSE FIELDS with ", ", not individual
+        words). Verified as a lossless ", " -> " " undo against samples.
+        A model trained on this quirk scored 0.9985 F1 on in-distribution
+        val data but only 0.7689 macro F1 on externally-formatted text --
+        purely a formatting-robustness problem, confirmed by reformatting
+        test text to match (0.9790) with zero retraining.
+      - inconsistent casing -- train text is 100% uppercase; forcing
+        uppercase here avoids reintroducing a train/inference case
+        mismatch until a future retrain is done on case-diverse text.
+
+    Idempotent: safe to call on text that's already been through this
+    function, or through normalize_text(), or through create_text_col().
+    """
+    if pd.isna(value):
+        return ""
+    s = str(value)
+    s = s.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+    s = re.sub(r"\bNULL\b", " ", s, flags=re.IGNORECASE)
+    s = s.replace(", ", " ")
+    s = s.upper()
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _row_text(row: pd.Series) -> str:
     """Concatenate all six cause-of-death text fields for a single record."""
     parts = [normalize_text(row.get(f, "")) for f in SEARCH_FIELDS]

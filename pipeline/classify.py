@@ -6,9 +6,9 @@ from tqdm import tqdm
 import argparse
 
 try:
-    from .regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns
+    from .regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns, clean_bert_text
 except ImportError:
-    from regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns
+    from regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns, clean_bert_text
 
 drug_cols = [
     "Methamphetamine",
@@ -34,7 +34,7 @@ class TextDataset(Dataset):
         return len(self.texts)
 
     def __getitem__(self, idx):
-        text = self.texts[idx]
+        text = clean_bert_text(self.texts[idx])
         encoding = self.tokenizer(
             text,
             padding="max_length",
@@ -137,7 +137,7 @@ def create_text_col(input_df):
     input_df["text"] = subset.apply(
         lambda row: ", ".join(part for part in row if part),
         axis=1,
-    )
+    ).apply(clean_bert_text)
 
     return input_df
 
