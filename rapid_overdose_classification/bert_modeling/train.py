@@ -199,7 +199,7 @@ def bert_model_train(input_data: str, bert_type: str):
 @app.command()
 def train(
     input_data: str = typer.Argument(
-        '../../data/processed_data/combined_data_removing_mislabels.pkl', help="Path to the input data file (pickle format)"
+        '../../data/processed_data/combined_data_removing_mislabels_corrected.pkl', help="Path to the input data file (pickle format)"
     ),
     bert_type: str = typer.Argument(
         'Bio_ClinicalBERT', help="Type of BERT model ('BERT' or 'Bio_ClinicalBERT')"
