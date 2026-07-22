@@ -146,6 +146,12 @@ NFLIS_NAME_EXCLUSIONS = {
     "n-pyrrolidino etonitazene", "n-pyrrolidino metonitazene",
     "n-pyrrolidino protonitazene", "n-desethyl protonitazene",
     "n-desethyl etonitazene",
+    # NFLIS lists the bare class word "Benzodiazepine" as if it were a
+    # specific substance name (Substance Name row, category
+    # "Benzodiazepines"). Excluded for the same reason as the generic-word
+    # exclusions above: 2% precision against Benzodiazepines specifically,
+    # verified against train_set_v2.csv.
+    "benzodiazepine",
 }
 
 # ---------------------------------------------------------------------------
@@ -206,10 +212,14 @@ ESSENTIAL_PATTERNS = [
     (r"\blaennec\b",               "Alcohol"),   # Laennec's cirrhosis = alcoholic cirrhosis
     (r"\bethanolism\b",            "Alcohol"),
     # --- Prescription opioids ---
-    (r"\bopioid\b",                "Prescription.opioids"),
-    (r"\bopioids\b",               "Prescription.opioids"),
-    (r"\bopiate\b",                "Prescription.opioids"),
-    (r"\bopiates\b",               "Prescription.opioids"),
+    # "opioid"/"opioids"/"opiate"/"opiates" deliberately excluded: generic
+    # class words, not named substances. Verified against train_set_v2.csv
+    # (2026-07): precision against Prescription.opioids specifically is
+    # catastrophic (0-17%, n=10-72 each) -- these were a pre-existing bug,
+    # silently injecting false positives via the OR-combine correction
+    # stage. "opioid"/"opioids" ARE still a reliable signal, but only for
+    # the Any Opioids AGGREGATE column (100% precision) -- see
+    # GENERAL_OPIOID_PATTERNS.
     (r"\bopium\b",                 "Prescription.opioids"),
     (r"\bmorphine\b",              "Prescription.opioids"),
     (r"\bcodeine\b",               "Prescription.opioids"),
@@ -245,10 +255,16 @@ ESSENTIAL_PATTERNS = [
     # signal for either Prescription.opioids or Others (~20-25% precision on
     # both), so we can't confidently route them without domain input.
     # --- Benzodiazepines ---
-    (r"\bbenzodiazepine\b",        "Benzodiazepines"),
-    (r"\bbenzodiazepines\b",       "Benzodiazepines"),
-    (r"\bbenzo\b",                 "Benzodiazepines"),
-    (r"\bbenzos\b",                "Benzodiazepines"),
+    # "benzodiazepine(s)"/"benzo(s)" deliberately excluded: generic class
+    # words, not named substances -- same bug class as the Prescription.
+    # opioids fix above. "benzodiazepine"/"benzodiazepines" verified against
+    # train_set_v2.csv: 2-5% precision (n=21-48). "benzo"/"benzos" have zero
+    # occurrences in train_set_v2.csv to verify empirically, but are the
+    # same kind of class-word shorthand, so excluded on the same principle.
+    # Unlike Prescription.opioids there's no separate "Any Benzodiazepines"
+    # aggregate column to redirect this evidence to (Benzodiazepines is both
+    # the specific and only column for this substance), so these are simply
+    # dropped rather than re-routed.
     (r"\bdiazepam\b",              "Benzodiazepines"),
     (r"\bvalium\b",                "Benzodiazepines"),
     (r"\balprazolam\b",            "Benzodiazepines"),
@@ -375,6 +391,18 @@ GENERAL_DRUG_PATTERNS = [
     r"\bchronic\s+intravenous\s+narcotism\b",
 ]
 
+# Generic "opioid(s)" mention with no specific drug named: sets Any Opioids
+# only, the same way GENERAL_DRUG_PATTERNS sets Any Drugs only. Validated
+# against data/train_set_v2.csv (2026-07): "opioid"/"opioids" is a 100%
+# consistent signal for Any Opioids=1 (81/81 records). Deliberately does
+# NOT include "opiate"/"opiates" -- that term is far less reliable in this
+# corpus (only 10/37 = 27% of records mentioning it have Any Opioids=1),
+# so treating it the same way would introduce real noise rather than
+# recovering a genuine convention.
+GENERAL_OPIOID_PATTERNS = [
+    r"\bopioids?\b",
+]
+
 # Pattern for detecting MDMA in cause-of-death text (used for Meth FP correction)
 MDMA_PAT = re.compile(r"methylenedioxy|(?<!\w)mdma(?!\w)|ecstasy", re.IGNORECASE)
 
@@ -439,6 +467,7 @@ def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
             compiled[col] = re.compile("|".join(unique), re.IGNORECASE)
 
     compiled["Any Drugs"] = re.compile("|".join(GENERAL_DRUG_PATTERNS), re.IGNORECASE)
+    compiled["Any Opioids"] = re.compile("|".join(GENERAL_OPIOID_PATTERNS), re.IGNORECASE)
     return compiled
 
 
@@ -507,7 +536,7 @@ def classify_record_detail(row: pd.Series, patterns: dict) -> dict:
     column, plus Any Drugs, that has at least one match. Searches each SEARCH_FIELD separately
     so the triggering field is identifiable (unlike _row_text which joins them).
     """
-    detail: dict[str, list] = {col: [] for col in SUBSTANCE_COLS + ["Any Drugs"]}
+    detail: dict[str, list] = {col: [] for col in SUBSTANCE_COLS + ["Any Drugs", "Any Opioids"]}
     for field in SEARCH_FIELDS:
         text = normalize_text(row.get(field, ""))
         if not text.strip():
@@ -553,6 +582,11 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
         np.zeros(len(out), dtype=int),
     )
     n_generic_any = int(any_drug_regex.sum())
+    any_opioid_regex = regex_flags.get(
+        "Any Opioids",
+        np.zeros(len(out), dtype=int),
+    )
+    n_generic_opioid = int(any_opioid_regex.sum())
 
     # Compute MDMA mask on the ORIGINAL BERT flags before any modification.
     # Condition: BERT fired (=1), regex did not (=0), text contains MDMA term.
@@ -610,9 +644,25 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
             f"{sign}{after_any - before_any:>5,}  {after_any:>7,}"
         )
         print(f"  Generic drug-death phrase matches: {n_generic_any:,}")
-    out["Any Opioids"]       = (
-        subst[["Heroin", "Fentanyl", "Prescription.opioids"]].sum(axis=1) > 0
+    original_any_opioids = (
+        out["Any Opioids"].fillna(0).astype(int).values
+        if "Any Opioids" in out.columns
+        else np.zeros(len(out), dtype=int)
+    )
+    out["Any Opioids"] = (
+        (subst[["Heroin", "Fentanyl", "Prescription.opioids"]].sum(axis=1) > 0).astype(int).values |
+        original_any_opioids |
+        any_opioid_regex
     ).astype(int)
+    if verbose:
+        before_opioid = int(original_any_opioids.sum())
+        after_opioid = int(out["Any Opioids"].sum())
+        sign = "+" if after_opioid >= before_opioid else ""
+        print(
+            f"  {'Any Opioids':<25} {before_opioid:>7,}  "
+            f"{sign}{after_opioid - before_opioid:>5,}  {after_opioid:>7,}"
+        )
+        print(f"  Generic 'opioid(s)' mention matches: {n_generic_opioid:,}")
 
     return out
 
@@ -636,7 +686,7 @@ def build_diff(original: pd.DataFrame, corrected: pd.DataFrame,
       - The six cause-of-death text fields for manual inspection
       - All remaining original columns
     """
-    compare_cols = SUBSTANCE_COLS + ["Any Drugs"]
+    compare_cols = SUBSTANCE_COLS + ["Any Drugs", "Any Opioids"]
     changed = pd.Series(False, index=original.index)
     for col in compare_cols:
         if col in original.columns and col in corrected.columns:
@@ -731,7 +781,7 @@ def cmd_diff(args):
     diff_df   = build_diff(df, corrected, patterns=patterns)
 
     print(f"\n{len(diff_df):,} rows changed across classification columns:")
-    for col in SUBSTANCE_COLS + ["Any Drugs"]:
+    for col in SUBSTANCE_COLS + ["Any Drugs", "Any Opioids"]:
         if col not in df.columns or col not in corrected.columns:
             continue
         n = (
