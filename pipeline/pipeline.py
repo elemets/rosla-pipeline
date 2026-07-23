@@ -16,7 +16,7 @@ CONVERTEDDIR = "./pipeline_steps/input_files/converted/"
 CLASSIFIEDDIR = "./pipeline_steps/input_files/classified/"
 OUTPUTDIR = "./pipeline_steps/input_files"
 LOGFILE = "./pipeline_steps/logs/pipeline_summary.txt"
-MODEL_NAME = "bert_models/bioclinicalbert"
+MODEL_NAME = "bert_models/Bio_ClinicalBERT_clean_text_v2"
 
 
 import os
