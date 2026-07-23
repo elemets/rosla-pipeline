@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -46,12 +47,28 @@ class TextDataset(Dataset):
         return encoding
 
 
+def load_thresholds(model_name):
+    """Load the per-label decision thresholds saved alongside a checkpoint.
+
+    These are tuned per label (F1-optimal on the validation set at train
+    time) rather than a flat 0.5, since rare classes need a much lower
+    cutoff to be recalled at all.
+    """
+    thresholds_path = f"../models/{model_name}/best_thresholds.json"
+    with open(thresholds_path, "r") as f:
+        best_thresholds = json.load(f)
+    return torch.tensor([best_thresholds[col] for col in drug_cols], dtype=torch.float32)
+
+
 def predict(pred_df, model_name, batch_size=16):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     n_gpus = torch.cuda.device_count()
 
     # Extract text from input
     texts = pred_df["text"].tolist()
+
+    # Per-label thresholds tuned for this specific checkpoint
+    thresholds = load_thresholds(model_name)
 
     # Load the correct tokenizer
     tokenizer = AutoTokenizer.from_pretrained(f"../models/{model_name}/")
@@ -86,8 +103,8 @@ def predict(pred_df, model_name, batch_size=16):
             all_predictions.append(predicted_probabilities)
 
     # Concatenate all batch results
-    y_pred = torch.cat(all_predictions, dim=0)
-    y_pred = (y_pred > 0.5).int()
+    y_probs = torch.cat(all_predictions, dim=0)
+    y_pred = (y_probs > thresholds).int()
 
     # Convert to DataFrame
     predicted_df = pd.DataFrame(y_pred.numpy(), columns=drug_cols)
