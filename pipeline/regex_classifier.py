@@ -8,10 +8,11 @@ Apply NFLIS-backed regex substance classification to an overdose CSV.
 This tool supplements and corrects BERT-classified substance columns:
 
   1. Regex supplement — runs the classifier over all six cause-of-death text
-     fields (CauseA-D, CauseOther, HowInjuryOccurred).  The BERT model only
-     saw the `text` field (CauseA-D concatenated) and misses substance mentions
-     in CauseOther and HowInjuryOccurred.  New detections are OR-combined with
-     BERT's flags for all eight substance columns, so no true positive is lost.
+     fields (CauseA-D, CauseOther, HowInjuryOccurred), the same fields
+     `classify.py::create_text_col` concatenates into the `text` field BERT
+     reads.  BERT still misses substance mentions the patterns catch, so new
+     detections are OR-combined with BERT's flags for all eight substance
+     columns and no true positive is lost.
 
   2. BERT false-positive correction — MDMA mis-labelled as Methamphetamine:
      BERT fires on the substring "methamphetamine" inside
@@ -56,8 +57,9 @@ SUBSTANCE_COLS = [
     "Alcohol", "Prescription.opioids", "Benzodiazepines", "Others",
 ]
 
-# All six cause-of-death text fields searched by the regex.
-# BERT only ever saw `text` (= CauseA-D concatenated).
+# All six cause-of-death text fields searched by the regex. Same set as the
+# `text` field BERT reads (see classify.py::create_text_col), which also accepts
+# the OtherCause / InjuryDesc spellings of the last two.
 SEARCH_FIELDS = [
     "CauseA", "CauseB", "CauseC", "CauseD", "CauseOther", "HowInjuryOccurred",
 ]

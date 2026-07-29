@@ -125,7 +125,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument(
         "--output",
-        default=str(ROOT / "reports" / "eval_external_regex_comparison.csv"),
+        default=str(ROOT / "reports" / "eval_external_regex_comparison_fabrice.csv"),
     )
     args = parser.parse_args()
 

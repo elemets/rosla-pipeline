@@ -78,6 +78,14 @@ RACE_BUCKETS = [
 # A value shorter than this never merges into a longer one as a truncation.
 MIN_TRUNCATION_LEN = 5
 
+# Words a clipped cell is left dangling on. A fragment ending in one of these
+# (or in a comma) was cut mid-phrase, so it is a truncation rather than a
+# complete value that happens to be a prefix of a longer one.
+DANGLING_RE = re.compile(
+    r"(,|\b(AND|OR|OF|WITH|TO|DUE|FROM|BY|IN|ON|AT|THE|A|AN|VS|VERSUS))\s*$",
+    re.IGNORECASE,
+)
+
 
 def load_raw_files(raw_dir):
     """Load every csv/xlsx in raw_dir into one canonical-column DataFrame."""
@@ -158,14 +166,66 @@ def build_long(df):
     return long
 
 
+def norm_word_starts(value):
+    """
+    Positions in a value's normalized key at which a new word begins.
+
+    Mirrors the text branch of `normalize_series` so a key offset can be
+    mapped back to a word boundary in the original text.
+    """
+    text = re.sub(
+        r"\b(NULL|NONE|NAN|N/?A|TRUE|FALSE|UNKNOWN|PENDING|DEFERRED)\b",
+        " ",
+        str(value).upper(),
+    )
+    starts = set()
+    idx = 0
+    at_start = True
+    for ch in text:
+        if ch.isascii() and ch.isalnum():
+            if at_start:
+                starts.add(idx)
+            idx += 1
+            at_start = False
+        else:
+            at_start = True
+    return starts, idx
+
+
+def is_truncation(fragment, target):
+    """
+    True if `fragment` is a clipped rendering of `target`, not a shorter
+    value that merely happens to line up with it.
+
+    A fragment qualifies when the cut falls inside a word ("METHAMPHETAMI"
+    for "METHAMPHETAMINE") or when it is left dangling on a conjunction or
+    comma. Requiring one of those keeps a complete value from being absorbed
+    into a corrupted extraction that glued two cells together.
+    """
+    if len(fragment["norm"]) < MIN_TRUNCATION_LEN:
+        return False
+    if target["norm"].startswith(fragment["norm"]):
+        cut = len(fragment["norm"])
+        if DANGLING_RE.search(str(fragment["value"])):
+            return True
+    elif target["norm"].endswith(fragment["norm"]):
+        cut = len(target["norm"]) - len(fragment["norm"])
+    else:
+        return False
+    starts, length = norm_word_starts(target["value"])
+    if length != len(target["norm"]):
+        return False  # key and text disagree; too unsure to merge
+    return cut not in starts
+
+
 def merge_truncated_votes(votes):
     """
     Fold truncated values into their full versions before counting.
 
-    Extractions frequently cut cells short ("MULTIPLE GUNSHOT" vs "MULTIPLE
-    GUNSHOT WOUNDS"). Within each (case, column) group, a value whose key is
-    a prefix of a longer value's key transfers its votes to the longer value
-    instead of competing with it.
+    Extractions frequently cut cells short ("EFFECTS OF METHAMPHETAMINE AND"
+    vs "EFFECTS OF METHAMPHETAMINE AND PHENCYCLIDINE"). Within each (case,
+    column) group, a value that is a clipped rendering of a longer value
+    transfers its votes to that value instead of competing with it.
     """
     contested_mask = votes.duplicated(["CaseNumber", "column"], keep=False)
     settled = votes[~contested_mask]
@@ -174,12 +234,7 @@ def merge_truncated_votes(votes):
         rows = group.sort_values("norm", key=lambda s: s.str.len(), ascending=False).to_dict("records")
         kept = []
         for row in rows:
-            target = next(
-                (k for k in kept
-                 if len(row["norm"]) >= MIN_TRUNCATION_LEN
-                 and (k["norm"].startswith(row["norm"]) or k["norm"].endswith(row["norm"]))),
-                None,
-            )
+            target = next((k for k in kept if is_truncation(row, k)), None)
             if target is not None:
                 target["count"] += row["count"]
             else:
