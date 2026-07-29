@@ -480,24 +480,40 @@ def process_single_file(file_path):
 
 
 def append_to_master_geocoded(new_geocoded_file):
+    """
+    Regenerate the master geocoded file from the per-file geocoded outputs.
+
+    The master is always rebuilt from scratch rather than appended to. Appending
+    made it write-only: a case that stopped classifying as an overdose after a
+    raw file was re-extracted had no fresh row left to displace it, so the stale
+    row survived every subsequent run. Rebuilding means the per-file geocoded
+    outputs are the single source of truth and deleting one actually removes its
+    cases.
+    """
 
     geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
     os.makedirs(geocode_dir, exist_ok=True)
     master_file = os.path.join(geocode_dir, "combined_classified_data_geocoded.csv")
     master_existed = os.path.exists(master_file)
 
-    if master_existed:
-        master_df = pd.read_csv(master_file)
-    else:
-        # Rebuild from all individual geocoded files so deleting the master is safe
-        prior = [
-            f for f in glob.glob(os.path.join(geocode_dir, "*_geocoded.csv"))
-            if f != master_file and os.path.abspath(f) != os.path.abspath(new_geocoded_file)
-        ]
-        master_df = pd.concat([pd.read_csv(f, low_memory=False) for f in prior], ignore_index=True) if prior else pd.DataFrame()
-    new_df = pd.read_csv(new_geocoded_file)
+    master_df = pd.read_csv(master_file, low_memory=False) if master_existed else None
 
-    combined_df = pd.concat([master_df, new_df], ignore_index=True)
+    # Rebuild from every per-file geocoded output. new_geocoded_file is one of
+    # them (process_single_file writes it before calling this), so it is picked
+    # up by the glob; guard against it being missed if that ever changes.
+    parts = sorted(
+        f
+        for f in glob.glob(os.path.join(geocode_dir, "*_geocoded.csv"))
+        if os.path.abspath(f) != os.path.abspath(master_file)
+    )
+    if os.path.abspath(new_geocoded_file) not in {os.path.abspath(f) for f in parts}:
+        parts.append(new_geocoded_file)
+
+    combined_df = (
+        pd.concat([pd.read_csv(f, low_memory=False) for f in parts], ignore_index=True)
+        if parts
+        else pd.DataFrame()
+    )
 
     historical_data = load_historical_data(geocode_dir)
 

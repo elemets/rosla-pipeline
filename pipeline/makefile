@@ -23,11 +23,19 @@ requirements: $(VENV_DIR)/bin/activate
 run_pipeline:
 	python pipeline.py
 
+# Target to build the all-deaths dataset (same collation as the pipeline, but
+# keeping every death rather than only the overdoses). Pass extra flags with
+# ARGS, e.g. `make all_deaths ARGS="--force"`.
+.PHONY: all_deaths
+all_deaths:
+	python all_deaths.py $(ARGS)
+
 # Optional: Clean up generated files
 .PHONY: clean
 clean:
 	rm -rf ./pipeline_steps/input_files/converted/*
 	rm -rf ./pipeline_steps/input_files/classified/*
+	rm -rf ./pipeline_steps/input_files/classified_all/*
 	rm -f ./pipeline_steps/input_files/combined_classified_data.csv
 	rm -f ./pipeline_steps/input_files/combined_classified_data_geocoded.csv
 	rm -f ./pipeline_steps/input_files/final.csv

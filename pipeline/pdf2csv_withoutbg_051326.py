@@ -13,8 +13,9 @@ PDF structure (learned from inspection):
         DeathAddress, EventAddress). These values are NOT left-aligned under their
         header; long ones start far to the left. So column positions are unreliable
         here -> the first token is the CaseNum, everything else is the second column.
-      * multi-column -> CaseNum + several short fields. Here values stay close enough
-        to their headers that midpoint-boundary bucketing works.
+      * multi-column -> CaseNum + several short fields. Every cell is left-aligned
+        under its header, so each word is bucketed into the last column whose left
+        edge it starts at or after.
   - Gender/Races leakage is repaired after bucketing: Gender keeps only a recognized
     gender token; extra tokens spill into Races.
 
@@ -32,6 +33,7 @@ import shutil
 import subprocess
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from html import unescape
 from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
@@ -41,7 +43,9 @@ from tqdm import tqdm
 app = typer.Typer(add_completion=False)
 
 CASE_RE = re.compile(r"^20\d{2}-\d{4,5}$")
-PAGE_SEP = "\x0c"
+# Points a value may start left of its own header before it is treated as
+# belonging to the column on its left.
+COL_START_TOLERANCE = 2.0
 
 # Some sub-tables name a column slightly differently than our canonical schema.
 HEADER_ALIASES = {
@@ -79,22 +83,69 @@ def get_total_pages(pdf_path: str) -> int:
     raise RuntimeError("Could not parse 'Pages:' line from pdfinfo output.")
 
 # ---------- pdftotext chunk extraction ----------
-def extract_pages_text(pdf_path: str, first: int, last: int) -> List[str]:
-    """Run `pdftotext -layout -f first -l last`. Returns (last-first+1) page strings."""
+WORD_RE = re.compile(
+    r'<word xMin="([\d.eE+-]+)" yMin="([\d.eE+-]+)" xMax="([\d.eE+-]+)" yMax="[\d.eE+-]+">(.*?)</word>'
+)
+PAGE_RE = re.compile(r"<page ")
+# Words whose baselines differ by less than this many points sit on one line.
+LINE_TOLERANCE = 3.0
+# Horizontal gap (points) that separates one column from the next. Words closer
+# than this belong to the same cell; the report's columns are always further apart.
+COLUMN_GAP = 8.0
+
+# A word and the horizontal span it occupies.
+Word = Tuple[str, float, float]
+Line = List[Word]
+
+def group_words_into_lines(words: List[Tuple[float, float, float, str]]) -> List[Line]:
+    """Group (y, x0, x1, word) tuples into lines, top-to-bottom then left-to-right."""
+    lines: List[Line] = []
+    current: List[Tuple[float, float, float, str]] = []
+    line_y = 0.0
+
+    def flush() -> None:
+        lines.append([(w, x0, x1) for _, x0, x1, w in sorted(current, key=lambda t: t[1])])
+
+    for y, x0, x1, w in sorted(words):
+        if current and y - line_y > LINE_TOLERANCE:
+            flush()
+            current = []
+        if not current:
+            line_y = y
+        current.append((y, x0, x1, w))
+    if current:
+        flush()
+    return lines
+
+def extract_pages_lines(pdf_path: str, first: int, last: int) -> List[List[Line]]:
+    """
+    Run `pdftotext -bbox -f first -l last`. Returns (last-first+1) pages, each a
+    list of lines, each line a list of (word, x_start, x_end) in points.
+
+    Word coordinates come straight from the PDF rather than from `-layout`'s
+    character grid: `-layout` shifts a column's text left when its neighbour
+    overflows, which makes header-relative positions unreliable for exactly the
+    wide free-text columns this report is full of.
+    """
     if not shutil.which("pdftotext"):
         raise RuntimeError(
             "pdftotext not found on PATH. Install poppler-utils: sudo apt install poppler-utils"
         )
     result = subprocess.run(
-        ["pdftotext", "-layout", "-f", str(first), "-l", str(last), pdf_path, "-"],
+        ["pdftotext", "-bbox", "-f", str(first), "-l", str(last), pdf_path, "-"],
         check=True, capture_output=True, text=True,
     )
-    pages = result.stdout.split(PAGE_SEP)
-    if pages and pages[-1] == "":
-        pages.pop()
+    pages: List[List[Line]] = []
+    for chunk in PAGE_RE.split(result.stdout)[1:]:
+        words = [
+            (round(float(y), 1), float(x0), float(x1), unescape(w))
+            for x0, y, x1, w in WORD_RE.findall(chunk)
+            if w
+        ]
+        pages.append(group_words_into_lines(words))
     expected = last - first + 1
     while len(pages) < expected:
-        pages.append("")
+        pages.append([])
     return pages[:expected]
 
 # ---------- Cleaning ----------
@@ -152,40 +203,59 @@ def normalize_race_value(raw: str) -> str:
     return ",".join(normalized)
 
 # ---------- Text-based page parser ----------
-def tokenize_words(line: str) -> List[Tuple[str, int]]:
-    """Return [(word, char_start), ...] for whitespace-separated words in `line`."""
-    out: List[Tuple[str, int]] = []
-    i = 0
-    while i < len(line):
-        if line[i].isspace():
-            i += 1
+def merge_spans(words: List[Word]) -> List[Tuple[float, float]]:
+    """Union of the horizontal spans the given words occupy, left to right."""
+    blocks: List[Tuple[float, float]] = []
+    for _, x0, x1 in sorted(words, key=lambda w: w[1]):
+        if blocks and x0 <= blocks[-1][1]:
+            blocks[-1] = (blocks[-1][0], max(blocks[-1][1], x1))
+        else:
+            blocks.append((x0, x1))
+    return blocks
+
+def widest_gap(blocks: List[Tuple[float, float]], lo: float, hi: float) -> Optional[float]:
+    """Midpoint of the widest uncovered stretch of [lo, hi], or None if fully covered."""
+    best = (0.0, None)
+    cursor = lo
+    for x0, x1 in blocks:
+        if x1 <= lo:
             continue
-        start = i
-        while i < len(line) and not line[i].isspace():
-            i += 1
-        out.append((line[start:i], start))
-    return out
+        if x0 >= hi:
+            break
+        if x0 - cursor > best[0]:
+            best = (x0 - cursor, (cursor + x0) / 2.0)
+        cursor = max(cursor, x1)
+    if hi - cursor > best[0]:
+        best = (hi - cursor, (cursor + hi) / 2.0)
+    return best[1] if best[0] > COLUMN_GAP else None
 
-def parse_header(line: str) -> Tuple[List[str], List[float]]:
+def column_boundaries(header: Line, body: List[Line]) -> List[float]:
     """
-    Return (canonical_column_names, column_boundaries).
+    Return len(header) - 1 x positions separating the sub-table's columns.
 
-    column_boundaries has len(columns) - 1 entries: boundary[i] is the midpoint between
-    header start positions of column i and column i+1. A word with start position s
-    belongs to column `bisect_right(boundaries, s)`.
+    Boundaries are read off the blank corridor that runs between two adjacent
+    headers rather than off a fixed offset from the header text: some sub-tables
+    are left-aligned and others centre their cells, so no single offset works for
+    both. Every column is separated from the next by whitespace in every row, so
+    the widest uncovered stretch between two header texts is their shared edge.
+    Where a cell overflows across that whole stretch, fall back to the next
+    column's own left edge.
     """
-    words = tokenize_words(line)
-    cols = [HEADER_ALIASES.get(w, w) for w, _ in words]
-    starts = [s for _, s in words]
-    boundaries = [
-        (starts[i - 1] + starts[i]) / 2.0
-        for i in range(1, len(starts))
-    ]
-    return cols, boundaries
+    blocks = merge_spans([w for line in [header] + body for w in line])
+    boundaries: List[float] = []
+    for i in range(1, len(header)):
+        gap = widest_gap(blocks, header[i - 1][2], header[i][1])
+        boundaries.append(header[i][1] - COL_START_TOLERANCE if gap is None else gap)
+    return boundaries
 
-def assign_word_to_col(boundaries: List[float], word_start: int, n_cols: int) -> int:
-    """Column index for a word, via midpoint boundaries. Clamped to [0, n_cols-1]."""
-    idx = bisect.bisect_right(boundaries, word_start)
+def parse_header(line: Line) -> List[str]:
+    """Canonical column names for a header line."""
+    return [HEADER_ALIASES.get(w, w) for w, _, _ in line]
+
+def assign_word_to_col(boundaries: List[float], word: Word, n_cols: int) -> int:
+    """Column index for a word, by the midpoint of the span it occupies."""
+    _, x0, x1 = word
+    idx = bisect.bisect_right(boundaries, (x0 + x1) / 2.0)
     return max(0, min(idx, n_cols - 1))
 
 def repair_gender_races(row: Dict[str, str], cols: List[str]) -> None:
@@ -217,69 +287,85 @@ def repair_gender_races(row: Dict[str, str], cols: List[str]) -> None:
     else:
         row["Races"] = f"{spill} {existing}"
 
-def parse_page_text(page_text: str) -> List[Dict[str, str]]:
-    """Parse one page's pdftotext output into row dicts."""
-    rows: List[Dict[str, str]] = []
-    current_cols: Optional[List[str]] = None
-    boundaries: Optional[List[float]] = None
-    last_row: Optional[Dict[str, str]] = None
+def bucket_line(words: Line, n_cols: int, boundaries: List[float]) -> List[List[str]]:
+    """Split one line's words into per-column word lists by x position."""
+    buckets: List[List[str]] = [[] for _ in range(n_cols)]
+    for word in words:
+        buckets[assign_word_to_col(boundaries, word, n_cols)].append(word[0])
+    return buckets
 
-    for line in page_text.splitlines():
-        if not line.strip():
+
+def split_sub_tables(page_lines: List[Line]) -> List[Tuple[List[str], List[Line]]]:
+    """Split a page into (column_names, body_lines) per sub-table header found."""
+    tables: List[Tuple[List[str], List[Line]]] = []
+    for line in page_lines:
+        if not line:
             continue
-
-        # Header detection: first token must be CaseNum, >=2 columns.
-        if "CaseNum" in line:
-            cols, bounds = parse_header(line)
-            if cols and cols[0] == "CaseNum" and len(cols) >= 2:
-                current_cols = cols
-                boundaries = bounds
-                last_row = None
+        if any(w == "CaseNum" for w, _, _ in line):
+            cols = parse_header(line)
+            if cols[0] == "CaseNum" and len(cols) >= 2:
+                tables.append((cols, [line]))
                 continue
+        if tables:
+            tables[-1][1].append(line)
+    # The header line stays at the front of each body so it counts towards the
+    # column corridors; strip it once boundaries have been derived.
+    return tables
 
-        if current_cols is None or boundaries is None:
-            continue
 
-        words = tokenize_words(line)
-        if not words:
-            continue
+def parse_sub_table(cols: List[str], lines: List[Line]) -> List[Dict[str, str]]:
+    """Parse one sub-table (header line first, then its rows) into row dicts."""
+    header, body = lines[0], lines[1:]
+    boundaries = column_boundaries(header, body)
+    rows: List[Dict[str, str]] = []
+    last_row: Optional[Dict[str, str]] = None
+    # Wrapped-cell lines seen since the last row, per column. A cell too long for
+    # one line spills UPWARDS in this report: the case number sits on the final
+    # line of the block, so the overflow arrives before the row it belongs to.
+    pending: Optional[List[List[str]]] = None
 
-        first_word, _ = words[0]
-
-        if CASE_RE.match(first_word):
-            if len(current_cols) == 2:
+    for words in body:
+        if CASE_RE.match(words[0][0]):
+            if len(cols) == 2:
                 # 2-column sub-table: CaseNum + one wide free-text field whose value
                 # is NOT reliably positioned under its header. The first token is the
                 # CaseNum (that's how we matched this row); everything else is column 2.
-                row = {
-                    current_cols[0]: clean_cell(words[0][0]),
-                    current_cols[1]: clean_cell(" ".join(w for w, _ in words[1:])),
-                }
+                buckets = [[words[0][0]], [w for w, _, _ in words[1:]]]
             else:
-                # Multi-column sub-table: values stay near their headers -> midpoint
-                # bucketing. Each word goes to the column whose territory it centers in.
-                buckets: List[List[str]] = [[] for _ in current_cols]
-                for w, w_start in words:
-                    buckets[assign_word_to_col(boundaries, w_start, len(current_cols))].append(w)
-                row = {
-                    col: clean_cell(" ".join(buckets[i]))
-                    for i, col in enumerate(current_cols)
-                }
-
-            repair_gender_races(row, current_cols)
+                buckets = bucket_line(words, len(cols), boundaries)
+            if pending is not None:
+                buckets = [p + b for p, b in zip(pending, buckets)]
+                pending = None
+            row = {col: clean_cell(" ".join(buckets[i])) for i, col in enumerate(cols)}
+            repair_gender_races(row, cols)
             rows.append(row)
             last_row = row
-        elif last_row is not None and len(current_cols) >= 2:
-            # Continuation/wrap line: append to right-most column (matches original behavior).
-            extra = clean_cell(line.strip())
-            if extra != "NULL":
-                last_col = current_cols[-1]
-                existing = last_row.get(last_col, "NULL")
-                if existing in ("NULL", ""):
-                    last_row[last_col] = extra
-                else:
-                    last_row[last_col] = clean_cell(f"{existing} {extra}")
+        else:
+            # Overflow line with no case number: hold it for the row below.
+            spill = (
+                [[], [w for w, _, _ in words]]
+                if len(cols) == 2
+                else bucket_line(words, len(cols), boundaries)
+            )
+            pending = spill if pending is None else [p + s for p, s in zip(pending, spill)]
 
+    # Overflow left over at the end of a sub-table belongs to its last row.
+    if pending is not None and last_row is not None:
+        for i, col in enumerate(cols):
+            extra = clean_cell(" ".join(pending[i]))
+            if extra == "NULL":
+                continue
+            existing = last_row.get(col, "NULL")
+            last_row[col] = extra if existing in ("NULL", "") else clean_cell(f"{existing} {extra}")
+
+    return rows
+
+
+def parse_page_text(page_lines: List[Line]) -> List[Dict[str, str]]:
+    """Parse one page's words-with-positions into row dicts."""
+    rows: List[Dict[str, str]] = []
+    for cols, lines in split_sub_tables(page_lines):
+        rows.extend(parse_sub_table(cols, lines))
     return rows
 
 # ---------- Case-level merge ----------
@@ -339,8 +425,8 @@ def merge_page_into_cases(
 # ---------- Parallel worker ----------
 def _worker_process_chunk(args: Tuple[str, int, int]) -> List[Tuple[int, List[Dict[str, str]]]]:
     pdf_path, first, last = args
-    pages_text = extract_pages_text(pdf_path, first, last)
-    return [(first + offset, parse_page_text(pt)) for offset, pt in enumerate(pages_text)]
+    pages = extract_pages_lines(pdf_path, first, last)
+    return [(first + offset, parse_page_text(pg)) for offset, pg in enumerate(pages)]
 
 # ---------- Top-level orchestration ----------
 def parse_pdf_to_dataframe(
