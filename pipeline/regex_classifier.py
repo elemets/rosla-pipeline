@@ -57,11 +57,19 @@ SUBSTANCE_COLS = [
     "Alcohol", "Prescription.opioids", "Benzodiazepines", "Others",
 ]
 
-# All six cause-of-death text fields searched by the regex. Same set as the
-# `text` field BERT reads (see classify.py::create_text_col), which also accepts
-# the OtherCause / InjuryDesc spellings of the last two.
+# All six cause-of-death text fields searched by the regex — the same fields
+# `classify.py::create_text_col` concatenates into the `text` field BERT reads.
+#
+# The last two carry two spellings each. Raw coroner exports name them
+# OtherCause / InjuryDesc; join_similar_columns renames them to CauseOther /
+# HowInjuryOccurred, but that runs *after* classification. Listing both means the
+# regex reads them whichever stage it is handed. Missing names resolve to "" in
+# `_row_text`, so naming a spelling a file does not use costs nothing, and a file
+# carrying both just repeats the text (harmless to a search).
 SEARCH_FIELDS = [
-    "CauseA", "CauseB", "CauseC", "CauseD", "CauseOther", "HowInjuryOccurred",
+    "CauseA", "CauseB", "CauseC", "CauseD",
+    "CauseOther", "OtherCause",
+    "HowInjuryOccurred", "InjuryDesc",
 ]
 
 # ---------------------------------------------------------------------------
@@ -296,6 +304,13 @@ ESSENTIAL_PATTERNS = [
     (r"\becstasy\b",               "Others"),
     (r"\bmolly\b",                 "Others"),
     (r"\bmda\b",                   "Others"),
+    # NFLIS lists this family only with its ring-position prefix
+    # ("3,4-Methylenedioxymethamphetamine"), which coroners routinely drop. The
+    # bare spellings must match here or MDMA cases end up with no substance at
+    # all: stage 2 clears the Methamphetamine that BERT fires on the embedded
+    # "methamphetamine" substring, and nothing sets Others in its place.
+    (r"\bmethylenedioxy(?:meth|ethyl)?amphetamine\b", "Others"),
+    (r"\bmethylenedioxypyrovalerone\b",               "Others"),
     (r"\bpcp\b",                   "Others"),
     (r"\bphencyclidine\b",         "Others"),
     (r"\bketamine\b",              "Others"),
@@ -468,7 +483,7 @@ def normalize_text(value) -> str:
 
 
 def _row_text(row: pd.Series) -> str:
-    """Concatenate all six cause-of-death text fields for a single record."""
+    """Concatenate the cause-of-death text fields for a single record."""
     parts = [normalize_text(row.get(f, "")) for f in SEARCH_FIELDS]
     return " | ".join(p for p in parts if p.strip())
 
@@ -619,7 +634,7 @@ def build_diff(original: pd.DataFrame, corrected: pd.DataFrame,
       - matched_evidence: which field/term triggered each new classification
         (only populated when `patterns` is supplied)
       - For each substance and Any Drugs: original value then <col>_new value side-by-side
-      - The six cause-of-death text fields for manual inspection
+      - The cause-of-death text fields for manual inspection
       - All remaining original columns
     """
     compare_cols = SUBSTANCE_COLS + ["Any Drugs"]
