@@ -16,6 +16,7 @@ from transformers_interpret import MultiLabelClassificationExplainer
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import json
+from pipeline.regex_classifier import clean_bert_text
 
 app = typer.Typer()
 
@@ -35,7 +36,7 @@ def save_explainability(explain_df: pd.DataFrame, model_type: str):
         num_labels=len(drug_cols),
         problem_type="multi_label_classification",
     ).to(device)
-    texts = explain_df["text"].tolist()
+    texts = explain_df["text"].apply(clean_bert_text).tolist()
     y_true = explain_df[drug_cols].values
 
     encodings = tokenizer(

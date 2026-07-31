@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 import torch
 from transformers import (
@@ -10,9 +11,9 @@ from tqdm import tqdm
 import argparse
 
 try:
-    from .regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns
+    from .regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns, clean_bert_text
 except ImportError:
-    from regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns
+    from regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns, clean_bert_text
 
 drug_cols = [
     "Methamphetamine",
@@ -42,8 +43,23 @@ class TextDataset(Dataset):
         # sequence. Attention masks make this identical to padding everything
         # to max_length, but avoids the wasted compute on pad tokens.
         return self.tokenizer(
-            self.texts[idx], truncation=True, max_length=self.max_length
+            clean_bert_text(self.texts[idx]),
+            truncation=True,
+            max_length=self.max_length,
         )
+
+
+def load_thresholds(model_name):
+    """Load the per-label decision thresholds saved alongside a checkpoint.
+
+    These are tuned per label (F1-optimal on the validation set at train
+    time) rather than a flat 0.5, since rare classes need a much lower
+    cutoff to be recalled at all.
+    """
+    thresholds_path = f"../models/{model_name}/best_thresholds.json"
+    with open(thresholds_path, "r") as f:
+        best_thresholds = json.load(f)
+    return torch.tensor([best_thresholds[col] for col in drug_cols], dtype=torch.float32)
 
 
 def predict(pred_df, model_name, batch_size=16):
@@ -52,6 +68,9 @@ def predict(pred_df, model_name, batch_size=16):
 
     # Extract text from input
     texts = pred_df["text"].tolist()
+
+    # Per-label thresholds tuned for this specific checkpoint
+    thresholds = load_thresholds(model_name)
 
     # Load the correct tokenizer
     tokenizer = AutoTokenizer.from_pretrained(f"../models/{model_name}/")
@@ -90,8 +109,8 @@ def predict(pred_df, model_name, batch_size=16):
             all_predictions.append(predicted_probabilities)
 
     # Concatenate all batch results
-    y_pred = torch.cat(all_predictions, dim=0)
-    y_pred = (y_pred > 0.5).int()
+    y_probs = torch.cat(all_predictions, dim=0)
+    y_pred = (y_probs > thresholds).int()
 
     # Convert to DataFrame
     predicted_df = pd.DataFrame(y_pred.numpy(), columns=drug_cols)
@@ -141,7 +160,7 @@ def create_text_col(input_df):
     input_df["text"] = subset.apply(
         lambda row: ", ".join(part for part in row if part),
         axis=1,
-    )
+    ).apply(clean_bert_text)
 
     return input_df
 
