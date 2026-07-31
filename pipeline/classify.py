@@ -1,7 +1,11 @@
 import json
 import pandas as pd
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    DataCollatorWithPadding,
+)
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import argparse
@@ -35,16 +39,14 @@ class TextDataset(Dataset):
         return len(self.texts)
 
     def __getitem__(self, idx):
-        text = clean_bert_text(self.texts[idx])
-        encoding = self.tokenizer(
-            text,
-            padding="max_length",
+        # No padding here: the collator pads each batch to its own longest
+        # sequence. Attention masks make this identical to padding everything
+        # to max_length, but avoids the wasted compute on pad tokens.
+        return self.tokenizer(
+            clean_bert_text(self.texts[idx]),
             truncation=True,
             max_length=self.max_length,
         )
-        # Convert lists to tensors
-        encoding = {key: torch.tensor(val) for key, val in encoding.items()}
-        return encoding
 
 
 def load_thresholds(model_name):
@@ -75,7 +77,11 @@ def predict(pred_df, model_name, batch_size=16):
 
     # Create Dataset and DataLoader for batch processing
     dataset = TextDataset(texts, tokenizer)
-    dataloader = DataLoader(dataset, batch_size=batch_size)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        collate_fn=DataCollatorWithPadding(tokenizer, return_tensors="pt"),
+    )
 
     # Load the model and wrap it for multi-GPU
     model = AutoModelForSequenceClassification.from_pretrained(

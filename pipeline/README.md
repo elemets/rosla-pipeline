@@ -97,6 +97,69 @@ To process additional data, add the new raw file to
 `pipeline_steps/input_files/raw/` and run `python pipeline.py` again. Existing
 cached files will be reused, and only new or missing work will be performed.
 
+## Checking 2025 stability as new reports arrive
+
+The pipeline now writes a stability audit whenever a new raw file is appended to
+the master geocoded output. The audit compares the master file immediately
+before and after that report is added, filtered to deaths in 2025.
+
+Audit files are written to:
+
+```text
+pipeline_steps/audits/
+```
+
+For each newly appended report, the audit writes:
+
+- `_summary.csv`: total 2025 cases before and after, net change, added cases,
+  removed cases, changed existing cases, and changed cells.
+- `_monthly.csv`: 2025 case counts by death month before and after.
+- `_added_cases.csv`: the case rows that were newly added.
+- `_removed_cases.csv`: case rows that disappeared.
+- `_changed_cells.csv`: field-level changes for cases that existed in both
+  versions.
+- `_added_by_source.csv`: newly added cases grouped by `source_file`.
+
+You can also compare any two existing master files or backups manually:
+
+```bash
+python audit_stability.py \
+  --old pipeline_steps/input_files/geocoded/combined_classified_data_geocoded.csv.bak-20260604-140155 \
+  --new pipeline_steps/input_files/geocoded/combined_classified_data_geocoded.csv \
+  --year 2025 \
+  --outdir pipeline_steps/audits \
+  --prefix manual_2025_check
+```
+
+The audit uses `CaseNumber` to decide whether a death is new, removed, or
+already present. It parses mixed date formats such as `2025-09-02` and
+`9/2/2025`, so 2025 records are counted correctly even when source files format
+dates differently.
+
+If you do not have meaningful before/after master backups, reconstruct the
+history from the existing per-file geocoded outputs instead:
+
+```bash
+python audit_stability.py \
+  --reconstruct-dir pipeline_steps/input_files/geocoded \
+  --processed-log pipeline_steps/logs/processed_files.txt \
+  --year 2025 \
+  --outdir pipeline_steps/audits \
+  --prefix reconstruct_2025
+```
+
+This replays the existing `*_geocoded.csv` files in the order listed in
+`processed_files.txt` and writes:
+
+- `_timeline.csv`: one row per added report, with 2025 counts before and after
+  that report.
+- `_monthly_by_step.csv`: month-level 2025 counts after each report.
+- `_added_cases_by_step.csv`: cases that first appear at each report.
+- `_removed_cases_by_step.csv`: cases that drop out of 2025 after a later
+  report updates the same `CaseNumber`.
+- `_changed_cells_by_step.csv`: field-level changes to existing 2025 cases
+  after each report.
+
 
 ## NFLIS CITATION
 

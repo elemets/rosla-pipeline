@@ -8,10 +8,11 @@ Apply NFLIS-backed regex substance classification to an overdose CSV.
 This tool supplements and corrects BERT-classified substance columns:
 
   1. Regex supplement — runs the classifier over all six cause-of-death text
-     fields (CauseA-D, CauseOther, HowInjuryOccurred).  The BERT model only
-     saw the `text` field (CauseA-D concatenated) and misses substance mentions
-     in CauseOther and HowInjuryOccurred.  New detections are OR-combined with
-     BERT's flags for all eight substance columns, so no true positive is lost.
+     fields (CauseA-D, CauseOther, HowInjuryOccurred), the same fields
+     `classify.py::create_text_col` concatenates into the `text` field BERT
+     reads.  BERT still misses substance mentions the patterns catch, so new
+     detections are OR-combined with BERT's flags for all eight substance
+     columns and no true positive is lost.
 
   2. BERT false-positive correction — MDMA mis-labelled as Methamphetamine:
      BERT fires on the substring "methamphetamine" inside
@@ -36,6 +37,7 @@ USAGE
 
 import re
 import argparse
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -55,10 +57,19 @@ SUBSTANCE_COLS = [
     "Alcohol", "Prescription.opioids", "Benzodiazepines", "Others",
 ]
 
-# All six cause-of-death text fields searched by the regex.
-# BERT only ever saw `text` (= CauseA-D concatenated).
+# All six cause-of-death text fields searched by the regex — the same fields
+# `classify.py::create_text_col` concatenates into the `text` field BERT reads.
+#
+# The last two carry two spellings each. Raw coroner exports name them
+# OtherCause / InjuryDesc; join_similar_columns renames them to CauseOther /
+# HowInjuryOccurred, but that runs *after* classification. Listing both means the
+# regex reads them whichever stage it is handed. Missing names resolve to "" in
+# `_row_text`, so naming a spelling a file does not use costs nothing, and a file
+# carrying both just repeats the text (harmless to a search).
 SEARCH_FIELDS = [
-    "CauseA", "CauseB", "CauseC", "CauseD", "CauseOther", "HowInjuryOccurred",
+    "CauseA", "CauseB", "CauseC", "CauseD",
+    "CauseOther", "OtherCause",
+    "HowInjuryOccurred", "InjuryDesc",
 ]
 
 # ---------------------------------------------------------------------------
@@ -312,6 +323,13 @@ ESSENTIAL_PATTERNS = [
     (r"\becstasy\b",               "Others"),
     (r"\bmolly\b",                 "Others"),
     (r"\bmda\b",                   "Others"),
+    # NFLIS lists this family only with its ring-position prefix
+    # ("3,4-Methylenedioxymethamphetamine"), which coroners routinely drop. The
+    # bare spellings must match here or MDMA cases end up with no substance at
+    # all: stage 2 clears the Methamphetamine that BERT fires on the embedded
+    # "methamphetamine" substring, and nothing sets Others in its place.
+    (r"\bmethylenedioxy(?:meth|ethyl)?amphetamine\b", "Others"),
+    (r"\bmethylenedioxypyrovalerone\b",               "Others"),
     (r"\bpcp\b",                   "Others"),
     (r"\bphencyclidine\b",         "Others"),
     (r"\bketamine\b",              "Others"),
@@ -506,7 +524,7 @@ def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
         if col:
             terms[col].append(str(row["Substance Name"]).strip())
 
-    essential_by_col: dict[str, list[str]] = {col: [] for col in SUBSTANCE_COLS}
+    essential_by_col: dict[str, list[str]] = defaultdict(list)
     for pattern_str, col in ESSENTIAL_PATTERNS:
         essential_by_col[col].append(pattern_str)
 
@@ -523,6 +541,8 @@ def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
         if unique:
             compiled[col] = re.compile("|".join(unique), re.IGNORECASE)
 
+    # Aggregate columns are driven by their own generic-phrase lists, not by
+    # ESSENTIAL_PATTERNS, which only ever names specific substances.
     compiled["Any Drugs"] = re.compile("|".join(GENERAL_DRUG_PATTERNS), re.IGNORECASE)
     compiled["Any Opioids"] = re.compile("|".join(GENERAL_OPIOID_PATTERNS), re.IGNORECASE)
     return compiled
@@ -576,7 +596,7 @@ def clean_bert_text(value) -> str:
 
 
 def _row_text(row: pd.Series) -> str:
-    """Concatenate all six cause-of-death text fields for a single record."""
+    """Concatenate the cause-of-death text fields for a single record."""
     parts = [normalize_text(row.get(f, "")) for f in SEARCH_FIELDS]
     return " | ".join(p for p in parts if p.strip())
 
@@ -639,6 +659,8 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
         np.zeros(len(out), dtype=int),
     )
     n_generic_any = int(any_drug_regex.sum())
+    # Generic opioid terms ("opioid", "opiate", …) set Any Opioids directly
+    # without implying a specific subtype (Heroin/Fentanyl/Prescription.opioids).
     any_opioid_regex = regex_flags.get(
         "Any Opioids",
         np.zeros(len(out), dtype=int),
@@ -740,7 +762,7 @@ def build_diff(original: pd.DataFrame, corrected: pd.DataFrame,
       - matched_evidence: which field/term triggered each new classification
         (only populated when `patterns` is supplied)
       - For each substance and Any Drugs: original value then <col>_new value side-by-side
-      - The six cause-of-death text fields for manual inspection
+      - The cause-of-death text fields for manual inspection
       - All remaining original columns
     """
     compare_cols = SUBSTANCE_COLS + ["Any Drugs", "Any Opioids"]
