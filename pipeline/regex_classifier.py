@@ -158,6 +158,13 @@ NFLIS_NAME_EXCLUSIONS = {
     "n-pyrrolidino protonitazene", "n-desethyl protonitazene",
     "n-desethyl etonitazene",
 }
+# NOTE: NFLIS also lists the bare class word "Benzodiazepine" as if it were
+# a specific substance name (Substance Name row, category "Benzodiazepines").
+# This looked like a 2% precision leak against train_set_v2.csv, but that
+# turned out to be a train labeling gap (58 unambiguous "BENZODIAZEPINE
+# TOXICITY"-style records with Benzodiazepines=0, since fixed) -- 100%
+# precise after the fix, so it's deliberately NOT excluded here. See
+# ESSENTIAL_PATTERNS below.
 
 # ---------------------------------------------------------------------------
 # Hard-coded patterns: street names, abbreviations, clinical shorthand absent
@@ -216,15 +223,15 @@ ESSENTIAL_PATTERNS = [
     (r"\balcoholic\s+cirrhosis\b", "Alcohol"),
     (r"\blaennec\b",               "Alcohol"),   # Laennec's cirrhosis = alcoholic cirrhosis
     (r"\bethanolism\b",            "Alcohol"),
-    # --- Generic opioid terms -> Any Opioids (not prescription-specific) ---
-    # Training-set evidence: "opioid" 64/72, "opioids" 9/9, "opiate" 5/6 of the
-    # true-opioid rows are Any Opioids without Prescription.opioids. Mapping these
-    # to Prescription.opioids was a false positive.
-    (r"\bopioid\b",                "Any Opioids"),
-    (r"\bopioids\b",               "Any Opioids"),
-    (r"\bopiate\b",                "Any Opioids"),
-    (r"\bopiates\b",               "Any Opioids"),
     # --- Prescription opioids ---
+    # "opioid"/"opioids"/"opiate"/"opiates" deliberately excluded here:
+    # generic class words, not named substances -- a specific column should
+    # only match a specific drug. Verified against train_set_v2.csv
+    # (2026-07): precision against Prescription.opioids specifically is
+    # catastrophic (0-17%, n=10-72 each) -- these were a pre-existing bug,
+    # silently injecting false positives via the OR-combine correction
+    # stage. All four terms ARE a 100% reliable signal for the Any Opioids
+    # AGGREGATE column instead -- see GENERAL_OPIOID_PATTERNS.
     (r"\bopium\b",                 "Prescription.opioids"),
     (r"\bmorphine\b",              "Prescription.opioids"),
     (r"\bcodeine\b",               "Prescription.opioids"),
@@ -260,6 +267,18 @@ ESSENTIAL_PATTERNS = [
     # signal for either Prescription.opioids or Others (~20-25% precision on
     # both), so we can't confidently route them without domain input.
     # --- Benzodiazepines ---
+    # "benzodiazepine(s)" initially looked like the same generic-class-word
+    # bug as Prescription.opioids (2-5% precision, n=21-48 in
+    # train_set_v2.csv), but turned out to be a train labeling gap instead:
+    # the low-precision records were unambiguous "BENZODIAZEPINE TOXICITY"-
+    # style cause-of-death text, not negated or ambiguous. Corrected in
+    # train_set_v2.csv (58 rows); 100% precise after the fix. Unlike
+    # "opioid" there's no aggregate column to disambiguate to here
+    # (Benzodiazepines is both the specific and only column for this
+    # substance), so once the labels are right, the generic term maps
+    # straight to it. "benzo"/"benzos" have zero occurrences in
+    # train_set_v2.csv to verify either way, but are the same kind of
+    # class-word shorthand, so included on the same principle.
     (r"\bbenzodiazepine\b",        "Benzodiazepines"),
     (r"\bbenzodiazepines\b",       "Benzodiazepines"),
     (r"\bbenzo\b",                 "Benzodiazepines"),
@@ -367,6 +386,51 @@ ESSENTIAL_PATTERNS = [
     (r"\bclonidine\b",             "Others"),
     (r"\bbupropion\b",             "Others"),
     (r"\bamitriptyline\b",         "Others"),
+    (r"\bnortriptyline\b",         "Others"),
+    (r"\bpaliperidone\b",          "Others"),
+    # --- Non-psychiatric substances that ARE in the NFLIS reference file but sit
+    # in categories NFLIS_CATEGORY_MAP skips ("Other substances", "Other",
+    # "Steroids", "Analgesics"), so build_patterns() never compiles them. Only
+    # 1,336 of the 3,101 NFLIS rows fall in mapped categories.
+    #
+    # That skip is right as a default -- mapping those categories in bulk pulls
+    # ~150 routine chronic-disease medication mentions ("INSULIN DEPENDENT
+    # DIABETES") and outright false positives ("EXPLOSION AT HEMP LABORATORY")
+    # into the cohort. This is a per-term allowlist back out of the skip instead:
+    # each term kept only if >90% of its matches in the LA County ME corpus
+    # (2012-2026, 146,085 records) co-occur with toxicity/intoxication/overdose
+    # language. Terms failing that bar stay excluded -- e.g. "warfarin", also in
+    # "Other substances", where 71% of matches are routine-therapy mentions like
+    # "ON WARFARIN THERAPY". Counts below are rows this adds to Others on
+    # classified_all_deaths_07302026_regex.csv.
+    (r"\bdifluoroethane\b",        "Others"),   # +127; inhalant ("huffing")
+    (r"\bacetaminophen\b",         "Others"),   # +101; hepatotoxic OD
+    (r"\bethylene\s+glycol\b",     "Others"),   # +23; antifreeze ingestion
+    (r"\blithium\b",               "Others"),   # +7
+    (r"\bloperamide\b",            "Others"),   # +6
+    (r"\bcolchicine\b",            "Others"),   # +3
+    (r"\bamantadine\b",            "Others"),   # +1
+    (r"\bdapsone\b",               "Others"),   # +0 here, retained for coverage
+    (r"\bmetaxalone\b",            "Others"),   # +0 here, retained for coverage
+    # Sodium/potassium nitrate self-poisoning. All 12 matches in this corpus are
+    # ingestion cases, but note NFLIS lists isosorbide dinitrate/mononitrate --
+    # the cardiac nitrates -- under "Other substances", so the bare-word pattern
+    # is arguably too broad and behaves here only because therapy mentions are
+    # phrased differently. Reviewer's call.
+    (r"\bnitrate[s]?\b",           "Others"),   # +12
+    # --- Cardiac/metabolic drugs. These are the class the wholesale-category
+    # exclusion above exists to avoid, so they were reviewed match-by-match:
+    # all 38 occurrences here are ingestion/overdose contexts ("AMLODIPINE
+    # TOXICITY", "METFORMIN INTOXICATION", "PROBABLE SEQUELAE OF CARVEDILOL AND
+    # AMLODIPINE INTOXICATION"), not comorbidity mentions. Flagged for a second
+    # opinion rather than assumed safe.
+    (r"\bamlodipine\b",            "Others"),   # +14
+    (r"\bmetformin\b",             "Others"),   # +12
+    (r"\bmetoprolol\b",            "Others"),   # +8
+    (r"\bdigoxin\b",               "Others"),   # +3
+    (r"\bfelodipine\b",            "Others"),   # +1
+    (r"\bverapamil\b",             "Others"),   # +0 here, retained for coverage
+    (r"\btamsulosin\b",            "Others"),   # +0 here, retained for coverage
 ]
 
 # Generic death-certificate phrases that establish a drug death without naming
@@ -395,6 +459,23 @@ GENERAL_DRUG_PATTERNS = [
     r"\bconsequences\s+of\s+drug\s+abuse\b",
     r"\boverdose\s+of\s+unkn[o0]wn\s+drug\b",
     r"\bchronic\s+intravenous\s+narcotism\b",
+]
+
+# Generic "opioid(s)"/"opiate(s)" mention with no specific drug named: sets
+# Any Opioids only, the same way GENERAL_DRUG_PATTERNS sets Any Drugs only.
+# Validated against data/train_set_v2.csv (2026-07): "opioid"/"opioids" is a
+# 100% consistent signal for Any Opioids=1 (81/81 records). "opiate"/
+# "opiates" initially looked much less reliable (10/37 = 27%), but that
+# turned out to be a train-set labeling gap, not a real difference in the
+# term's reliability -- the 27 "opiate"-mentioning records with
+# Any Opioids=0 were unambiguous opiate-toxicity/overdose cause-of-death
+# text (e.g. "COMPLICATIONS OF OPIATE TOXICITY" with every other substance
+# column also 0), not negated or ambiguous. Corrected in train_set_v2.csv;
+# "opiate"/"opiates" is 100% precise against Any Opioids after the fix,
+# same as "opioid"/"opioids".
+GENERAL_OPIOID_PATTERNS = [
+    r"\bopioids?\b",
+    r"\bopiates?\b",
 ]
 
 # Pattern for detecting MDMA in cause-of-death text (used for Meth FP correction)
@@ -460,13 +541,10 @@ def build_patterns(nflis_path: Path = DEFAULT_NFLIS) -> dict:
         if unique:
             compiled[col] = re.compile("|".join(unique), re.IGNORECASE)
 
-    # Generic opioid terms set Any Opioids directly (no specific subtype).
-    if essential_by_col.get("Any Opioids"):
-        compiled["Any Opioids"] = re.compile(
-            "|".join(essential_by_col["Any Opioids"]), re.IGNORECASE
-        )
-
+    # Aggregate columns are driven by their own generic-phrase lists, not by
+    # ESSENTIAL_PATTERNS, which only ever names specific substances.
     compiled["Any Drugs"] = re.compile("|".join(GENERAL_DRUG_PATTERNS), re.IGNORECASE)
+    compiled["Any Opioids"] = re.compile("|".join(GENERAL_OPIOID_PATTERNS), re.IGNORECASE)
     return compiled
 
 
@@ -480,6 +558,41 @@ def normalize_text(value) -> str:
         return ""
     s = str(value).replace("\n", " ").replace("\r", " ")
     return re.sub(r"\bNULL\b", " ", s, flags=re.IGNORECASE)
+
+
+def clean_bert_text(value) -> str:
+    """Normalize free text before it's tokenized for the multi-label BERT
+    classifier. Single choke point for every quirk found in the 2026-07
+    train/test formatting investigation:
+
+      - literal "NULL" placeholder tokens (raw field concatenation used to
+        build recoded_ext_test.csv leaves these in when a field is empty)
+      - tab characters (used in recoded_ext_test.csv to join Primary.Cause
+        and Secondary.Cause)
+      - "comma after every single word" -- an artifact of whatever built
+        combined_data_removing_mislabels.pkl's text column, NOT a real
+        punctuation convention and NOT what create_text_col() below
+        produces (which only joins CAUSE FIELDS with ", ", not individual
+        words). Verified as a lossless ", " -> " " undo against samples.
+        A model trained on this quirk scored 0.9985 F1 on in-distribution
+        val data but only 0.7689 macro F1 on externally-formatted text --
+        purely a formatting-robustness problem, confirmed by reformatting
+        test text to match (0.9790) with zero retraining.
+      - inconsistent casing -- train text is 100% uppercase; forcing
+        uppercase here avoids reintroducing a train/inference case
+        mismatch until a future retrain is done on case-diverse text.
+
+    Idempotent: safe to call on text that's already been through this
+    function, or through normalize_text(), or through create_text_col().
+    """
+    if pd.isna(value):
+        return ""
+    s = str(value)
+    s = s.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+    s = re.sub(r"\bNULL\b", " ", s, flags=re.IGNORECASE)
+    s = s.replace(", ", " ")
+    s = s.upper()
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def _row_text(row: pd.Series) -> str:
@@ -500,7 +613,7 @@ def classify_record_detail(row: pd.Series, patterns: dict) -> dict:
     column, plus Any Drugs, that has at least one match. Searches each SEARCH_FIELD separately
     so the triggering field is identifiable (unlike _row_text which joins them).
     """
-    detail: dict[str, list] = {col: [] for col in SUBSTANCE_COLS + ["Any Drugs"]}
+    detail: dict[str, list] = {col: [] for col in SUBSTANCE_COLS + ["Any Drugs", "Any Opioids"]}
     for field in SEARCH_FIELDS:
         text = normalize_text(row.get(field, ""))
         if not text.strip():
@@ -552,6 +665,7 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
         "Any Opioids",
         np.zeros(len(out), dtype=int),
     )
+    n_generic_opioid = int(any_opioid_regex.sum())
 
     # Compute MDMA mask on the ORIGINAL BERT flags before any modification.
     # Condition: BERT fired (=1), regex did not (=0), text contains MDMA term.
@@ -609,11 +723,25 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
             f"{sign}{after_any - before_any:>5,}  {after_any:>7,}"
         )
         print(f"  Generic drug-death phrase matches: {n_generic_any:,}")
-    out["Any Opioids"]       = (
-        (subst[["Heroin", "Fentanyl", "Prescription.opioids"]].sum(axis=1) > 0).values |
-        out["Any Opioids"].fillna(0).astype(int).values |
+    original_any_opioids = (
+        out["Any Opioids"].fillna(0).astype(int).values
+        if "Any Opioids" in out.columns
+        else np.zeros(len(out), dtype=int)
+    )
+    out["Any Opioids"] = (
+        (subst[["Heroin", "Fentanyl", "Prescription.opioids"]].sum(axis=1) > 0).astype(int).values |
+        original_any_opioids |
         any_opioid_regex
     ).astype(int)
+    if verbose:
+        before_opioid = int(original_any_opioids.sum())
+        after_opioid = int(out["Any Opioids"].sum())
+        sign = "+" if after_opioid >= before_opioid else ""
+        print(
+            f"  {'Any Opioids':<25} {before_opioid:>7,}  "
+            f"{sign}{after_opioid - before_opioid:>5,}  {after_opioid:>7,}"
+        )
+        print(f"  Generic 'opioid(s)' mention matches: {n_generic_opioid:,}")
 
     return out
 
@@ -637,7 +765,7 @@ def build_diff(original: pd.DataFrame, corrected: pd.DataFrame,
       - The cause-of-death text fields for manual inspection
       - All remaining original columns
     """
-    compare_cols = SUBSTANCE_COLS + ["Any Drugs"]
+    compare_cols = SUBSTANCE_COLS + ["Any Drugs", "Any Opioids"]
     changed = pd.Series(False, index=original.index)
     for col in compare_cols:
         if col in original.columns and col in corrected.columns:
@@ -732,7 +860,7 @@ def cmd_diff(args):
     diff_df   = build_diff(df, corrected, patterns=patterns)
 
     print(f"\n{len(diff_df):,} rows changed across classification columns:")
-    for col in SUBSTANCE_COLS + ["Any Drugs"]:
+    for col in SUBSTANCE_COLS + ["Any Drugs", "Any Opioids"]:
         if col not in df.columns or col not in corrected.columns:
             continue
         n = (

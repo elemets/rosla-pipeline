@@ -35,6 +35,7 @@ from tqdm import tqdm
 import numpy as np
 import mlflow
 from rapid_overdose_classification.config import MLFLOW_URI
+from pipeline.regex_classifier import clean_bert_text
 
 app = typer.Typer(help="Evaluation of BERT style models")
 
@@ -66,7 +67,7 @@ def evaluate_bert_models(
     else:
         eval_df = pd.read_csv(input_data)
 
-    texts = eval_df["text"].tolist()
+    texts = eval_df["text"].apply(clean_bert_text).tolist()
     y_true = eval_df[drug_cols].values
 
     tokenizer = AutoTokenizer.from_pretrained(f"{MODEL_PATH}{model_type}")
