@@ -368,6 +368,51 @@ ESSENTIAL_PATTERNS = [
     (r"\bclonidine\b",             "Others"),
     (r"\bbupropion\b",             "Others"),
     (r"\bamitriptyline\b",         "Others"),
+    (r"\bnortriptyline\b",         "Others"),
+    (r"\bpaliperidone\b",          "Others"),
+    # --- Non-psychiatric substances that ARE in the NFLIS reference file but sit
+    # in categories NFLIS_CATEGORY_MAP skips ("Other substances", "Other",
+    # "Steroids", "Analgesics"), so build_patterns() never compiles them. Only
+    # 1,336 of the 3,101 NFLIS rows fall in mapped categories.
+    #
+    # That skip is right as a default -- mapping those categories in bulk pulls
+    # ~150 routine chronic-disease medication mentions ("INSULIN DEPENDENT
+    # DIABETES") and outright false positives ("EXPLOSION AT HEMP LABORATORY")
+    # into the cohort. This is a per-term allowlist back out of the skip instead:
+    # each term kept only if >90% of its matches in the LA County ME corpus
+    # (2012-2026, 146,085 records) co-occur with toxicity/intoxication/overdose
+    # language. Terms failing that bar stay excluded -- e.g. "warfarin", also in
+    # "Other substances", where 71% of matches are routine-therapy mentions like
+    # "ON WARFARIN THERAPY". Counts below are rows this adds to Others on
+    # classified_all_deaths_07302026_regex.csv.
+    (r"\bdifluoroethane\b",        "Others"),   # +127; inhalant ("huffing")
+    (r"\bacetaminophen\b",         "Others"),   # +101; hepatotoxic OD
+    (r"\bethylene\s+glycol\b",     "Others"),   # +23; antifreeze ingestion
+    (r"\blithium\b",               "Others"),   # +7
+    (r"\bloperamide\b",            "Others"),   # +6
+    (r"\bcolchicine\b",            "Others"),   # +3
+    (r"\bamantadine\b",            "Others"),   # +1
+    (r"\bdapsone\b",               "Others"),   # +0 here, retained for coverage
+    (r"\bmetaxalone\b",            "Others"),   # +0 here, retained for coverage
+    # Sodium/potassium nitrate self-poisoning. All 12 matches in this corpus are
+    # ingestion cases, but note NFLIS lists isosorbide dinitrate/mononitrate --
+    # the cardiac nitrates -- under "Other substances", so the bare-word pattern
+    # is arguably too broad and behaves here only because therapy mentions are
+    # phrased differently. Reviewer's call.
+    (r"\bnitrate[s]?\b",           "Others"),   # +12
+    # --- Cardiac/metabolic drugs. These are the class the wholesale-category
+    # exclusion above exists to avoid, so they were reviewed match-by-match:
+    # all 38 occurrences here are ingestion/overdose contexts ("AMLODIPINE
+    # TOXICITY", "METFORMIN INTOXICATION", "PROBABLE SEQUELAE OF CARVEDILOL AND
+    # AMLODIPINE INTOXICATION"), not comorbidity mentions. Flagged for a second
+    # opinion rather than assumed safe.
+    (r"\bamlodipine\b",            "Others"),   # +14
+    (r"\bmetformin\b",             "Others"),   # +12
+    (r"\bmetoprolol\b",            "Others"),   # +8
+    (r"\bdigoxin\b",               "Others"),   # +3
+    (r"\bfelodipine\b",            "Others"),   # +1
+    (r"\bverapamil\b",             "Others"),   # +0 here, retained for coverage
+    (r"\btamsulosin\b",            "Others"),   # +0 here, retained for coverage
 ]
 
 # Generic death-certificate phrases that establish a drug death without naming
