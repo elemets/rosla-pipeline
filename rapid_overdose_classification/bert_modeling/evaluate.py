@@ -4,7 +4,6 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from rapid_overdose_classification.bert_modeling.constants import (
     drug_cols,
-    device,
     MODEL_PATH,
     EVALUATION_RESULTS_PATH,
     EVALUATION_MISMATCHES_PATH,
@@ -18,6 +17,7 @@ from rapid_overdose_classification.bert_modeling.config import (
     BOOTSTRAP_NUM_RESAMPLES,
     BOOTSTRAP_AVERAGE,
     EXTERNAL_EXPERIMENT_NAME,
+    device,
     INTERNAL_EXPERIMENT_NAME,
 )
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -34,7 +34,7 @@ from model_tuner.bootstrapper import evaluate_bootstrap_metrics
 from tqdm import tqdm
 import numpy as np
 import mlflow
-from rapid_overdose_classification.config import mlflow_uri
+from rapid_overdose_classification.config import MLFLOW_URI
 from pipeline.regex_classifier import clean_bert_text
 
 app = typer.Typer(help="Evaluation of BERT style models")
@@ -58,7 +58,7 @@ def evaluate_bert_models(
     Returns:
         None
     """
-    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_tracking_uri(MLFLOW_URI)
 
     if input_data.endswith(".pkl"):
         eval_df = pd.read_pickle(input_data)
@@ -257,13 +257,13 @@ def evaluate_bert_models(
 @app.command()
 def evaluate(
     input_data: str = typer.Argument(
-        "../../data/test_set.csv", help="Path to input test data (CSV, PKL, or XLSX)"
+        "../../data/recoded_ext_test_v2.csv", help="Path to input test data (CSV, PKL, or XLSX)"
     ),
     model_type: str = typer.Argument(
         "bioclinicalbert", help="BERT model type ('BERT' or 'Bio_ClinicalBERT')"
     ),
     external_dataset: int = typer.Argument(
-        0, help="0 for internal test set, 1 for external dataset"
+        1, help="0 for internal test set, 1 for external dataset"
     ),
     batch_size: int = typer.Argument(EVAL_BATCH_SIZE, help="Batch size for evaluation"),
 ):

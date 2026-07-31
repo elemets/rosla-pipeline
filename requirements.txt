@@ -4,8 +4,8 @@ matplotlib==3.10.3
 mlflow==3.1.0
 model_tuner==0.0.31b0
 nltk==3.9.1
-numpy>=1.20.1
-pandas>=2.0.0
+numpy>=2.0.0
+pandas>=2.2.2,<3
 scikit_learn>=1.5.1
 scispacy<=0.5.5
 spacy<=3.8.7

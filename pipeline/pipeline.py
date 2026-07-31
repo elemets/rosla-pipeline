@@ -2,6 +2,7 @@ import os
 import glob
 import subprocess
 import logging
+import sys
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -17,6 +18,7 @@ CLASSIFIEDDIR = "./pipeline_steps/input_files/classified/"
 OUTPUTDIR = "./pipeline_steps/input_files"
 LOGFILE = "./pipeline_steps/logs/pipeline_summary.txt"
 MODEL_NAME = "bert_models/Bio_ClinicalBERT_clean_text_v2"
+AUDITDIR = "./pipeline_steps/audits"
 
 
 import os
@@ -478,23 +480,40 @@ def process_single_file(file_path):
 
 
 def append_to_master_geocoded(new_geocoded_file):
+    """
+    Regenerate the master geocoded file from the per-file geocoded outputs.
+
+    The master is always rebuilt from scratch rather than appended to. Appending
+    made it write-only: a case that stopped classifying as an overdose after a
+    raw file was re-extracted had no fresh row left to displace it, so the stale
+    row survived every subsequent run. Rebuilding means the per-file geocoded
+    outputs are the single source of truth and deleting one actually removes its
+    cases.
+    """
 
     geocode_dir = os.path.join(OUTPUTDIR, "geocoded")
     os.makedirs(geocode_dir, exist_ok=True)
     master_file = os.path.join(geocode_dir, "combined_classified_data_geocoded.csv")
+    master_existed = os.path.exists(master_file)
 
-    if os.path.exists(master_file):
-        master_df = pd.read_csv(master_file)
-    else:
-        # Rebuild from all individual geocoded files so deleting the master is safe
-        prior = [
-            f for f in glob.glob(os.path.join(geocode_dir, "*_geocoded.csv"))
-            if f != master_file and os.path.abspath(f) != os.path.abspath(new_geocoded_file)
-        ]
-        master_df = pd.concat([pd.read_csv(f, low_memory=False) for f in prior], ignore_index=True) if prior else pd.DataFrame()
-    new_df = pd.read_csv(new_geocoded_file)
+    master_df = pd.read_csv(master_file, low_memory=False) if master_existed else None
 
-    combined_df = pd.concat([master_df, new_df], ignore_index=True)
+    # Rebuild from every per-file geocoded output. new_geocoded_file is one of
+    # them (process_single_file writes it before calling this), so it is picked
+    # up by the glob; guard against it being missed if that ever changes.
+    parts = sorted(
+        f
+        for f in glob.glob(os.path.join(geocode_dir, "*_geocoded.csv"))
+        if os.path.abspath(f) != os.path.abspath(master_file)
+    )
+    if os.path.abspath(new_geocoded_file) not in {os.path.abspath(f) for f in parts}:
+        parts.append(new_geocoded_file)
+
+    combined_df = (
+        pd.concat([pd.read_csv(f, low_memory=False) for f in parts], ignore_index=True)
+        if parts
+        else pd.DataFrame()
+    )
 
     historical_data = load_historical_data(geocode_dir)
 
@@ -515,6 +534,41 @@ def append_to_master_geocoded(new_geocoded_file):
     # Save the updated master file
     combined_df.to_csv(master_file, index=False)
     print(f"Master geocoded data updated and saved to: {master_file}")
+
+    if master_existed:
+        write_stability_audit(master_df, master_file, new_geocoded_file, year=2025)
+
+
+def write_stability_audit(before_df, master_file, new_geocoded_file, year=2025):
+    os.makedirs(AUDITDIR, exist_ok=True)
+    basename = Path(new_geocoded_file).stem.replace("_geocoded", "")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    prefix = f"{timestamp}_{basename}_stability_{year}"
+    before_file = os.path.join(AUDITDIR, f"{prefix}_before_master.csv")
+
+    before_df.to_csv(before_file, index=False)
+    audit_script = Path(__file__).with_name("audit_stability.py")
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                str(audit_script),
+                "--old",
+                before_file,
+                "--new",
+                master_file,
+                "--year",
+                str(year),
+                "--outdir",
+                AUDITDIR,
+                "--prefix",
+                prefix,
+            ],
+            check=True,
+        )
+    finally:
+        if os.path.exists(before_file):
+            os.remove(before_file)
 
 
 def main():
