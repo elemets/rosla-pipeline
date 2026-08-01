@@ -1,14 +1,32 @@
 term,nflis_category,status,n_corpus,rows_added_to_others
 difluoroethane,Other substances,added_this_branch,131,127
 acetaminophen,Analgesics,added_this_branch,123,103
+propranolol,Other substances,added_this_branch,27,9
 metoprolol,Other substances,added_this_branch,25,13
 amlodipine,Other substances,added_this_branch,24,17
 ethylene glycol,Other substances,added_this_branch,24,23
 nortriptyline,Antidepressants,added_this_branch,20,8
+promethazine,Other substances,added_this_branch,20,13
+baclofen,Other substances,added_this_branch,16,6
+metoclopramide,Other substances,added_this_branch,15,2
 loperamide,Other substances,added_this_branch,14,7
+hydroxychloroquine,Other,added_this_branch,14,10
+ibuprofen,Analgesics,added_this_branch,14,10
 metformin,Other substances,added_this_branch,13,13
+pseudoephedrine,Other substances,added_this_branch,13,7
+norchlorcyclizine,Other substances,added_this_branch,12,1
+methocarbamol,Other substances,added_this_branch,11,1
+valproic acid,Other substances,added_this_branch,11,1
 lithium,Other substances,added_this_branch,10,7
+chlorcyclizine,Other substances,added_this_branch,10,1
+buspirone,Other substances,added_this_branch,7,1
+chlorpheniramine,Other substances,added_this_branch,7,4
+diltiazem,Other substances,added_this_branch,7,6
 verapamil,Other substances,added_this_branch,6,5
+dextromethorphan,Other substances,added_this_branch,6,3
+donepezil,Other substances,added_this_branch,6,0
+tizanidine,Other substances,added_this_branch,6,1
+atenolol,Other substances,added_this_branch,5,1
 colchicine,Other substances,added_this_branch,4,4
 digoxin,Other substances,added_this_branch,4,4
 metaxalone,Other substances,added_this_branch,3,1
@@ -45,28 +63,10 @@ escitalopram,Antidepressants,already_in_others,2,0
 norfluoxetine,Other substances,already_in_others,2,1
 insulin,Other substances,not_included,87,84
 lidocaine,Other substances,not_included,43,37
-propranolol,Other substances,not_included,27,9
-promethazine,Other substances,not_included,20,13
-baclofen,Other substances,not_included,16,6
-metoclopramide,Other substances,not_included,15,2
-hydroxychloroquine,Other,not_included,14,10
-ibuprofen,Analgesics,not_included,14,10
-pseudoephedrine,Other substances,not_included,13,7
-norchlorcyclizine,Other substances,not_included,12,1
 levamisole,Other substances,not_included,11,8
-methocarbamol,Other substances,not_included,11,1
-valproic acid,Other substances,not_included,11,1
-chlorcyclizine,Other substances,not_included,10,1
 aspirin,Analgesics,not_included,8,6
 fluvoxamine,Antidepressants,not_included,8,3
 warfarin,Other substances,not_included,8,7
-buspirone,Other substances,not_included,7,1
-chlorpheniramine,Other substances,not_included,7,4
-diltiazem,Other substances,not_included,7,6
-dextromethorphan,Other substances,not_included,6,3
-donepezil,Other substances,not_included,6,0
-tizanidine,Other substances,not_included,6,1
-atenolol,Other substances,not_included,5,1
 desloratadine,Other substances,not_included,5,2
 benzonatate,Other substances,not_included,4,3
 dipyrone,Analgesics,not_included,4,3

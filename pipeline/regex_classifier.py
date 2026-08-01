@@ -496,6 +496,44 @@ ESSENTIAL_PATTERNS = [
     (r"\bfelodipine\b",            "Others"),   # +1
     (r"\bverapamil\b",             "Others"),   # +5
     (r"\btamsulosin\b",            "Others"),   # +1
+    # --- Added 2026-07-31 from the blinded adjudication described in
+    # reports/others_allowlist_adjudication.csv. Unlike the terms above these
+    # have a recorded basis: up to 10 randomly sampled matches per term were
+    # read as cause-of-death text with all labels hidden, and scored against a
+    # rubric fixed before reading (CONTRIBUTING = named as causing or
+    # contributing to death via toxicity/ingestion/inhalation; INCIDENTAL =
+    # comorbidity, chronic therapy, or adverse reaction to correct dosing).
+    # Every term below scored >=90% CONTRIBUTING. The same pass rejected
+    # "insulin" (1/10 -- the rest are "INSULIN-DEPENDENT DIABETES MELLITUS",
+    # and it would have added 84 rows), "warfarin" (3/8 -- "ON WARFARIN
+    # THERAPY", "WARFARIN INDUCED COAGULOPATHY" after a fall) and "phenytoin"
+    # (2/4 -- "ADVERSE EFFECTS OF PHENYTOIN" is a reaction to correct dosing,
+    # not an overdose).
+    #
+    # NOT added, pending a scope decision rather than an evidence one:
+    # "lidocaine" (10/10) and "levamisole" (10/10) both pass the rubric but
+    # are cocaine/fentanyl cutting agents -- present because the primary drug
+    # was contaminated, not because anyone took them. Whether an adulterant
+    # counts as a substance for this cohort is a question for the study, not
+    # for the text. They would add ~1 and ~0 rows respectively.
+    (r"\bpromethazine\b",          "Others"),   # +13
+    (r"\bhydroxychloroquine\b",    "Others"),   # +10
+    (r"\bibuprofen\b",             "Others"),   # +10
+    (r"\bpropranolol\b",           "Others"),   # +9
+    (r"\bpseudoephedrine\b",       "Others"),   # +7
+    (r"\bbaclofen\b",              "Others"),   # +6
+    (r"\bdiltiazem\b",             "Others"),   # +6
+    (r"\bchlorpheniramine\b",      "Others"),   # +4
+    (r"\bdextromethorphan\b",      "Others"),   # +3; see NFLIS_NAME_EXCLUSIONS note
+    (r"\bmetoclopramide\b",        "Others"),   # +2
+    (r"\batenolol\b",              "Others"),   # +1
+    (r"\bbuspirone\b",             "Others"),   # +1
+    (r"\bchlorcyclizine\b",        "Others"),   # +1
+    (r"\bnorchlorcyclizine\b",     "Others"),   # +1; distinct token, \b blocks the above
+    (r"\bmethocarbamol\b",         "Others"),   # +1
+    (r"\btizanidine\b",            "Others"),   # +1
+    (r"\bvalproic\s+acid\b",       "Others"),   # +1
+    (r"\bdonepezil\b",             "Others"),   # +0 here, retained for coverage
 ]
 
 # Generic death-certificate phrases that establish a drug death without naming
