@@ -158,13 +158,10 @@ NFLIS_NAME_EXCLUSIONS = {
     "n-pyrrolidino protonitazene", "n-desethyl protonitazene",
     "n-desethyl etonitazene",
 }
-# NOTE: NFLIS also lists the bare class word "Benzodiazepine" as if it were
-# a specific substance name (Substance Name row, category "Benzodiazepines").
-# This looked like a 2% precision leak against train_set_v2.csv, but that
-# turned out to be a train labeling gap (58 unambiguous "BENZODIAZEPINE
-# TOXICITY"-style records with Benzodiazepines=0, since fixed) -- 100%
-# precise after the fix, so it's deliberately NOT excluded here. See
-# ESSENTIAL_PATTERNS below.
+# NOTE: NFLIS lists the bare class word "Benzodiazepine" as a substance name.
+# Deliberately NOT excluded: its apparent 2% precision against train_set_v2.csv
+# was a labeling gap (58 "BENZODIAZEPINE TOXICITY" records with the column 0,
+# since fixed), 100% precise after. See ESSENTIAL_PATTERNS below.
 
 # ---------------------------------------------------------------------------
 # Hard-coded patterns: street names, abbreviations, clinical shorthand absent
@@ -224,14 +221,9 @@ ESSENTIAL_PATTERNS = [
     (r"\blaennec\b",               "Alcohol"),   # Laennec's cirrhosis = alcoholic cirrhosis
     (r"\bethanolism\b",            "Alcohol"),
     # --- Prescription opioids ---
-    # "opioid"/"opioids"/"opiate"/"opiates" deliberately excluded here:
-    # generic class words, not named substances -- a specific column should
-    # only match a specific drug. Verified against train_set_v2.csv
-    # (2026-07): precision against Prescription.opioids specifically is
-    # catastrophic (0-17%, n=10-72 each) -- these were a pre-existing bug,
-    # silently injecting false positives via the OR-combine correction
-    # stage. All four terms ARE a 100% reliable signal for the Any Opioids
-    # AGGREGATE column instead -- see GENERAL_OPIOID_PATTERNS.
+    # "opioid(s)"/"opiate(s)" deliberately excluded: generic class words, only
+    # 0-17% precise against Prescription.opioids specifically. They route to
+    # the aggregate column instead -- see GENERAL_OPIOID_PATTERNS.
     (r"\bopium\b",                 "Prescription.opioids"),
     (r"\bmorphine\b",              "Prescription.opioids"),
     (r"\bcodeine\b",               "Prescription.opioids"),
@@ -267,18 +259,11 @@ ESSENTIAL_PATTERNS = [
     # signal for either Prescription.opioids or Others (~20-25% precision on
     # both), so we can't confidently route them without domain input.
     # --- Benzodiazepines ---
-    # "benzodiazepine(s)" initially looked like the same generic-class-word
-    # bug as Prescription.opioids (2-5% precision, n=21-48 in
-    # train_set_v2.csv), but turned out to be a train labeling gap instead:
-    # the low-precision records were unambiguous "BENZODIAZEPINE TOXICITY"-
-    # style cause-of-death text, not negated or ambiguous. Corrected in
-    # train_set_v2.csv (58 rows); 100% precise after the fix. Unlike
-    # "opioid" there's no aggregate column to disambiguate to here
-    # (Benzodiazepines is both the specific and only column for this
-    # substance), so once the labels are right, the generic term maps
-    # straight to it. "benzo"/"benzos" have zero occurrences in
-    # train_set_v2.csv to verify either way, but are the same kind of
-    # class-word shorthand, so included on the same principle.
+    # The generic class words DO map here, unlike the opioid ones above: there
+    # is no aggregate column to route them to (Benzodiazepines is both the
+    # specific and only column), and their apparent 2-5% precision was a train
+    # labeling gap, 100% after the fix. "benzo"/"benzos" never occur in
+    # train_set_v2.csv but are included as the same kind of shorthand.
     (r"\bbenzodiazepine\b",        "Benzodiazepines"),
     (r"\bbenzodiazepines\b",       "Benzodiazepines"),
     (r"\bbenzo\b",                 "Benzodiazepines"),
@@ -388,107 +373,34 @@ ESSENTIAL_PATTERNS = [
     (r"\bamitriptyline\b",         "Others"),
     (r"\bnortriptyline\b",         "Others"),
     (r"\bpaliperidone\b",          "Others"),
-    # --- Non-psychiatric substances that ARE in the NFLIS reference file but sit
-    # in categories NFLIS_CATEGORY_MAP skips ("Other substances", "Other",
-    # "Steroids", "Analgesics"), so build_patterns() never compiles them. Only
-    # 1,336 of the 3,101 NFLIS rows fall in mapped categories.
-    #
-    # That skip is right as a default -- mapping those categories in bulk pulls
-    # ~150 routine chronic-disease medication mentions ("INSULIN DEPENDENT
-    # DIABETES") and outright false positives ("EXPLOSION AT HEMP LABORATORY")
-    # into the cohort. This is a per-term allowlist back out of the skip instead.
-    #
-    # HOW THESE TERMS WERE CHOSEN (and what is not known)
-    # ---------------------------------------------------
-    # Candidate pool: every substance name and synonym from the 1,765 skipped
-    # NFLIS rows -- 1,891 unique terms. The filter that actually does the work
-    # is corpus occurrence, not pharmacology: only 154 of those 1,891 appear
-    # even once in the LA County ME corpus (2012-2026, 146,085 records), and
-    # only 58 appear 5+ times. That is why this list is tens of terms and not
-    # hundreds.
-    #
-    # What separated these terms from the other ~135 occurring candidates was
-    # a by-hand read of their matches. That review is not reconstructable from
-    # what is recorded here, so treat the list as reviewed judgment, not as
-    # the output of a rule.
-    #
-    # In particular, do NOT reach for a "share of matches occurring in
-    # toxicity language" score to justify or re-derive it. That was tried and
-    # abandoned: the number is almost entirely an artifact of which phrases
-    # the lexicon happens to include. Because this corpus writes drug deaths
-    # as "EFFECTS OF <drug>" / "INTAKE OF DRUGS" rather than "<drug>
-    # TOXICITY", loperamide and metoprolol score 50% and 72% under one word
-    # list and 100% under another. Worse, the metric is scored per RECORD,
-    # not per MENTION, so it cannot distinguish a poisoning from a therapy
-    # mention sitting in the same record as an unrelated overdose -- and it
-    # passes outright false positives such as the lithium record reading
-    # "SEQUELAE OF thermal injuries ... lithium batteries when they exploded
-    # and caught fire". It also does not discriminate: 22 of the 25
-    # not-included candidates at n>=5 clear 90% on the corpus-matched
-    # lexicon, the same as the terms kept here.
-    #
-    # The audit trail is reports/nflis_skipped_category_candidates.csv: all
-    # 154 occurring candidates with corpus frequency, current status, and
-    # rows each would add, so what was left out is inspectable even though
-    # the reasoning is not recorded. Unresolved candidates scoring
-    # indistinguishably from what is kept: ibuprofen (n=14), chlorcyclizine
-    # (n=10), promethazine (n=20), baclofen (n=16), hydroxychloroquine
-    # (n=14). dextromethorphan (n=6) is additionally blocked upstream by
-    # "methorphan" in NFLIS_NAME_EXCLUSIONS, an exclusion that predates
-    # clean_bert_text and may now be obsolete.
-    #
-    # False positives found by reading matches. "dapsone" and "amantadine"
-    # were dropped from this list on that basis: dapsone's sole corpus match
-    # is "NEUTROPENIA, POSSIBLY DAPSONE-INDUCED" (an adverse drug reaction,
-    # not an overdose) and both amantadine matches are therapeutic
-    # accumulation ("AMANTADINE ACCUMULATION | MEDICATION PRESCRIBED FOR").
-    # Between them they contributed 3 rows, so removing them costs nothing.
-    # One known FP remains, in "lithium": the battery fire quoted above, 1 of
-    # 10 matches. It is kept because the other 9 are genuine lithium
-    # toxicity; a narrower pattern excluding "lithium batter(y|ies)" would be
-    # the fix if that 1 record matters.
-    #
-    # VALIDATION STATUS. Independent support comes from the external test set,
-    # not the train set: 14 records across difluoroethane, acetaminophen,
-    # ethylene glycol, loperamide and amlodipine are all labelled Others=1,
-    # and none of those rows were touched by the 2026-07 label-correction
-    # pass, so they are not circular. The train set gives no usable signal --
-    # 10 of these terms never occur in it, and the 37 records where they do
-    # occur with Others=0 are on inspection labelling gaps rather than false
-    # positives (see reports/model_outputs/train_set_v2_others_allowlist_
-    # review.csv), but those are proposed corrections, not yet applied.
-    #
-    # Counts below are rows each term newly adds to Others relative to
-    # rosla_clean_pipe, on classified_all_deaths_07302026_regex.csv.
+    # --- Substances NFLIS lists in categories NFLIS_CATEGORY_MAP skips
+    # ("Other substances", "Other", "Steroids", "Analgesics"). Mapping those
+    # wholesale drags in chronic-disease mentions ("INSULIN DEPENDENT
+    # DIABETES"), so this is a per-term allowlist, chosen by reading each
+    # candidate's matches -- reviewed judgment, not a rule. Don't re-derive it
+    # from a "% of matches in toxicity language" score: this corpus writes
+    # "EFFECTS OF <drug>", so that number swings 50-100% on word-list choice
+    # and doesn't separate the accepted terms from the rejected ones.
+    # Candidates and per-record verdicts in reports/.
+    # Counts are rows added to Others on classified_all_deaths_07302026.
     (r"\bdifluoroethane\b",        "Others"),   # +127; inhalant ("huffing")
     (r"\bacetaminophen\b",         "Others"),   # +103; hepatotoxic OD
     (r"\bethylene\s+glycol\b",     "Others"),   # +23; antifreeze ingestion
-    (r"\blithium\b",               "Others"),   # +7 (1 is a battery-fire FP, see above)
+    (r"\blithium\b",               "Others"),   # +7; 1 FP, a battery fire
     (r"\bloperamide\b",            "Others"),   # +7
     (r"\bcolchicine\b",            "Others"),   # +4
     (r"\bmetaxalone\b",            "Others"),   # +1
-    # Sodium/potassium nitrate self-poisoning. All 12 matches in this corpus are
-    # ingestion cases, but note NFLIS lists isosorbide dinitrate/mononitrate --
-    # the cardiac nitrates -- under "Other substances", so the bare-word pattern
-    # is arguably too broad and behaves here only because therapy mentions are
-    # phrased differently. The candidate table confirms the pattern does reach
-    # "isosorbide mononitrate" (n=1) as well as "potassium nitrate" (n=1);
-    # both are ingestion cases here, so it costs nothing in this corpus, but
-    # the breadth is real. Reviewer's call.
+    # Sodium/potassium nitrate self-poisoning. Broader than it looks: NFLIS
+    # files the cardiac nitrates (isosorbide di/mononitrate) in the same
+    # category, and the bare word does reach them. Costs nothing in this
+    # corpus -- all 12 matches are ingestions -- but the breadth is real.
     (r"\bnitrate[s]?\b",           "Others"),   # +12; 11 of 12 are SUICIDE mode
-    # --- Cardiac/metabolic drugs. These are the class the wholesale-category
-    # exclusion above exists to avoid, so they were reviewed match-by-match:
-    # the occurrences here are ingestion/overdose contexts ("AMLODIPINE
-    # TOXICITY", "METFORMIN INTOXICATION", "PROBABLE SEQUELAE OF CARVEDILOL AND
-    # AMLODIPINE INTOXICATION"), not comorbidity mentions. Flagged for a second
-    # opinion rather than assumed safe -- the case for them rests entirely on
-    # that by-hand read, since no aggregate signal separates them from the
-    # cardiac/metabolic candidates left out (atenolol, diltiazem,
-    # propranolol). Note they skew heavily to intentional self-poisoning
-    # rather than illicit use: of the rows they add, amlodipine is 12/17
-    # SUICIDE mode and metoprolol 11/13, against 19% suicide for Others
-    # overall. If the cohort is ever scoped to illicit/recreational overdose
-    # specifically, this whole group needs revisiting.
+    # --- Cardiac/metabolic drugs: the class the wholesale-category exclusion
+    # exists to avoid, so each match was read individually and all are
+    # ingestion contexts ("METFORMIN INTOXICATION"). They skew to intentional
+    # self-poisoning rather than illicit use -- amlodipine is 12/17 SUICIDE
+    # mode, metoprolol 11/13, against 19% for Others overall. Revisit this
+    # whole group if the cohort is ever scoped to illicit overdose.
     (r"\bamlodipine\b",            "Others"),   # +17
     (r"\bmetformin\b",             "Others"),   # +13
     (r"\bmetoprolol\b",            "Others"),   # +13
@@ -496,26 +408,13 @@ ESSENTIAL_PATTERNS = [
     (r"\bfelodipine\b",            "Others"),   # +1
     (r"\bverapamil\b",             "Others"),   # +5
     (r"\btamsulosin\b",            "Others"),   # +1
-    # --- Added 2026-07-31 from the blinded adjudication described in
-    # reports/others_allowlist_adjudication.csv. Unlike the terms above these
-    # have a recorded basis: up to 10 randomly sampled matches per term were
-    # read as cause-of-death text with all labels hidden, and scored against a
-    # rubric fixed before reading (CONTRIBUTING = named as causing or
-    # contributing to death via toxicity/ingestion/inhalation; INCIDENTAL =
-    # comorbidity, chronic therapy, or adverse reaction to correct dosing).
-    # Every term below scored >=90% CONTRIBUTING. The same pass rejected
-    # "insulin" (1/10 -- the rest are "INSULIN-DEPENDENT DIABETES MELLITUS",
-    # and it would have added 84 rows), "warfarin" (3/8 -- "ON WARFARIN
-    # THERAPY", "WARFARIN INDUCED COAGULOPATHY" after a fall) and "phenytoin"
-    # (2/4 -- "ADVERSE EFFECTS OF PHENYTOIN" is a reaction to correct dosing,
-    # not an overdose).
-    #
-    # NOT added, pending a scope decision rather than an evidence one:
-    # "lidocaine" (10/10) and "levamisole" (10/10) both pass the rubric but
-    # are cocaine/fentanyl cutting agents -- present because the primary drug
-    # was contaminated, not because anyone took them. Whether an adulterant
-    # counts as a substance for this cohort is a question for the study, not
-    # for the text. They would add ~1 and ~0 rows respectively.
+    # --- From the blinded adjudication (reports/others_allowlist_
+    # adjudication.csv): sampled matches read as cause text with labels
+    # hidden, all scoring >=90% "contributing to death". The same pass
+    # rejected insulin (1/10, would have added 84 rows), warfarin (3/8) and
+    # phenytoin (2/4). lidocaine and levamisole pass but are NOT added --
+    # cutting agents, present because the supply was contaminated rather than
+    # because anyone took them; a scope question for the study.
     (r"\bpromethazine\b",          "Others"),   # +13
     (r"\bhydroxychloroquine\b",    "Others"),   # +10
     (r"\bibuprofen\b",             "Others"),   # +10
@@ -564,18 +463,10 @@ GENERAL_DRUG_PATTERNS = [
     r"\bchronic\s+intravenous\s+narcotism\b",
 ]
 
-# Generic "opioid(s)"/"opiate(s)" mention with no specific drug named: sets
-# Any Opioids only, the same way GENERAL_DRUG_PATTERNS sets Any Drugs only.
-# Validated against data/train_set_v2.csv (2026-07): "opioid"/"opioids" is a
-# 100% consistent signal for Any Opioids=1 (81/81 records). "opiate"/
-# "opiates" initially looked much less reliable (10/37 = 27%), but that
-# turned out to be a train-set labeling gap, not a real difference in the
-# term's reliability -- the 27 "opiate"-mentioning records with
-# Any Opioids=0 were unambiguous opiate-toxicity/overdose cause-of-death
-# text (e.g. "COMPLICATIONS OF OPIATE TOXICITY" with every other substance
-# column also 0), not negated or ambiguous. Corrected in train_set_v2.csv;
-# "opiate"/"opiates" is 100% precise against Any Opioids after the fix,
-# same as "opioid"/"opioids".
+# Generic "opioid(s)"/"opiate(s)" with no specific drug named: sets Any Opioids
+# only, the same way GENERAL_DRUG_PATTERNS sets Any Drugs only. All four terms
+# are 100% precise against Any Opioids in train_set_v2.csv ("opiate" only after
+# 27 labeling gaps there were corrected).
 GENERAL_OPIOID_PATTERNS = [
     r"\bopioids?\b",
     r"\bopiates?\b",
@@ -665,28 +556,19 @@ def normalize_text(value) -> str:
 
 def clean_bert_text(value) -> str:
     """Normalize free text before it's tokenized for the multi-label BERT
-    classifier. Single choke point for every quirk found in the 2026-07
-    train/test formatting investigation:
+    classifier. Single choke point for the formatting quirks that differ
+    between the train and external-test corpora:
 
-      - literal "NULL" placeholder tokens (raw field concatenation used to
-        build recoded_ext_test.csv leaves these in when a field is empty)
-      - tab characters (used in recoded_ext_test.csv to join Primary.Cause
-        and Secondary.Cause)
-      - "comma after every single word" -- an artifact of whatever built
-        combined_data_removing_mislabels.pkl's text column, NOT a real
-        punctuation convention and NOT what create_text_col() below
-        produces (which only joins CAUSE FIELDS with ", ", not individual
-        words). Verified as a lossless ", " -> " " undo against samples.
-        A model trained on this quirk scored 0.9985 F1 on in-distribution
-        val data but only 0.7689 macro F1 on externally-formatted text --
-        purely a formatting-robustness problem, confirmed by reformatting
-        test text to match (0.9790) with zero retraining.
-      - inconsistent casing -- train text is 100% uppercase; forcing
-        uppercase here avoids reintroducing a train/inference case
-        mismatch until a future retrain is done on case-diverse text.
+      - literal "NULL" placeholder tokens, and tabs used as field joiners
+      - "comma after every single word", an artifact in the training text
+        column. A model trained on it scored 0.9985 F1 in-distribution but
+        0.7689 macro F1 on externally-formatted text; reformatting the test
+        text to match recovered 0.9790 with no retraining.
+      - casing: train text is 100% uppercase, so force uppercase until a
+        retrain on case-diverse text.
 
-    Idempotent: safe to call on text that's already been through this
-    function, or through normalize_text(), or through create_text_col().
+    Idempotent: safe to call on text already through this function,
+    normalize_text(), or create_text_col().
     """
     if pd.isna(value):
         return ""
