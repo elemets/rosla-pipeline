@@ -396,41 +396,106 @@ ESSENTIAL_PATTERNS = [
     # That skip is right as a default -- mapping those categories in bulk pulls
     # ~150 routine chronic-disease medication mentions ("INSULIN DEPENDENT
     # DIABETES") and outright false positives ("EXPLOSION AT HEMP LABORATORY")
-    # into the cohort. This is a per-term allowlist back out of the skip instead:
-    # each term kept only if >90% of its matches in the LA County ME corpus
-    # (2012-2026, 146,085 records) co-occur with toxicity/intoxication/overdose
-    # language. Terms failing that bar stay excluded -- e.g. "warfarin", also in
-    # "Other substances", where 71% of matches are routine-therapy mentions like
-    # "ON WARFARIN THERAPY". Counts below are rows this adds to Others on
-    # classified_all_deaths_07302026_regex.csv.
+    # into the cohort. This is a per-term allowlist back out of the skip instead.
+    #
+    # HOW THESE TERMS WERE CHOSEN (and what is not known)
+    # ---------------------------------------------------
+    # Candidate pool: every substance name and synonym from the 1,765 skipped
+    # NFLIS rows -- 1,891 unique terms. The filter that actually does the work
+    # is corpus occurrence, not pharmacology: only 154 of those 1,891 appear
+    # even once in the LA County ME corpus (2012-2026, 146,085 records), and
+    # only 58 appear 5+ times. That is why this list is tens of terms and not
+    # hundreds.
+    #
+    # What separated these terms from the other ~135 occurring candidates was
+    # a by-hand read of their matches. That review is not reconstructable from
+    # what is recorded here, so treat the list as reviewed judgment, not as
+    # the output of a rule.
+    #
+    # In particular, do NOT reach for a "share of matches occurring in
+    # toxicity language" score to justify or re-derive it. That was tried and
+    # abandoned: the number is almost entirely an artifact of which phrases
+    # the lexicon happens to include. Because this corpus writes drug deaths
+    # as "EFFECTS OF <drug>" / "INTAKE OF DRUGS" rather than "<drug>
+    # TOXICITY", loperamide and metoprolol score 50% and 72% under one word
+    # list and 100% under another. Worse, the metric is scored per RECORD,
+    # not per MENTION, so it cannot distinguish a poisoning from a therapy
+    # mention sitting in the same record as an unrelated overdose -- and it
+    # passes outright false positives such as the lithium record reading
+    # "SEQUELAE OF thermal injuries ... lithium batteries when they exploded
+    # and caught fire". It also does not discriminate: 22 of the 25
+    # not-included candidates at n>=5 clear 90% on the corpus-matched
+    # lexicon, the same as the terms kept here.
+    #
+    # The audit trail is reports/nflis_skipped_category_candidates.csv: all
+    # 154 occurring candidates with corpus frequency, current status, and
+    # rows each would add, so what was left out is inspectable even though
+    # the reasoning is not recorded. Unresolved candidates scoring
+    # indistinguishably from what is kept: ibuprofen (n=14), chlorcyclizine
+    # (n=10), promethazine (n=20), baclofen (n=16), hydroxychloroquine
+    # (n=14). dextromethorphan (n=6) is additionally blocked upstream by
+    # "methorphan" in NFLIS_NAME_EXCLUSIONS, an exclusion that predates
+    # clean_bert_text and may now be obsolete.
+    #
+    # False positives found by reading matches. "dapsone" and "amantadine"
+    # were dropped from this list on that basis: dapsone's sole corpus match
+    # is "NEUTROPENIA, POSSIBLY DAPSONE-INDUCED" (an adverse drug reaction,
+    # not an overdose) and both amantadine matches are therapeutic
+    # accumulation ("AMANTADINE ACCUMULATION | MEDICATION PRESCRIBED FOR").
+    # Between them they contributed 3 rows, so removing them costs nothing.
+    # One known FP remains, in "lithium": the battery fire quoted above, 1 of
+    # 10 matches. It is kept because the other 9 are genuine lithium
+    # toxicity; a narrower pattern excluding "lithium batter(y|ies)" would be
+    # the fix if that 1 record matters.
+    #
+    # VALIDATION STATUS. Independent support comes from the external test set,
+    # not the train set: 14 records across difluoroethane, acetaminophen,
+    # ethylene glycol, loperamide and amlodipine are all labelled Others=1,
+    # and none of those rows were touched by the 2026-07 label-correction
+    # pass, so they are not circular. The train set gives no usable signal --
+    # 10 of these terms never occur in it, and the 37 records where they do
+    # occur with Others=0 are on inspection labelling gaps rather than false
+    # positives (see reports/model_outputs/train_set_v2_others_allowlist_
+    # review.csv), but those are proposed corrections, not yet applied.
+    #
+    # Counts below are rows each term newly adds to Others relative to
+    # rosla_clean_pipe, on classified_all_deaths_07302026_regex.csv.
     (r"\bdifluoroethane\b",        "Others"),   # +127; inhalant ("huffing")
-    (r"\bacetaminophen\b",         "Others"),   # +101; hepatotoxic OD
+    (r"\bacetaminophen\b",         "Others"),   # +103; hepatotoxic OD
     (r"\bethylene\s+glycol\b",     "Others"),   # +23; antifreeze ingestion
-    (r"\blithium\b",               "Others"),   # +7
-    (r"\bloperamide\b",            "Others"),   # +6
-    (r"\bcolchicine\b",            "Others"),   # +3
-    (r"\bamantadine\b",            "Others"),   # +1
-    (r"\bdapsone\b",               "Others"),   # +0 here, retained for coverage
-    (r"\bmetaxalone\b",            "Others"),   # +0 here, retained for coverage
+    (r"\blithium\b",               "Others"),   # +7 (1 is a battery-fire FP, see above)
+    (r"\bloperamide\b",            "Others"),   # +7
+    (r"\bcolchicine\b",            "Others"),   # +4
+    (r"\bmetaxalone\b",            "Others"),   # +1
     # Sodium/potassium nitrate self-poisoning. All 12 matches in this corpus are
     # ingestion cases, but note NFLIS lists isosorbide dinitrate/mononitrate --
     # the cardiac nitrates -- under "Other substances", so the bare-word pattern
     # is arguably too broad and behaves here only because therapy mentions are
-    # phrased differently. Reviewer's call.
-    (r"\bnitrate[s]?\b",           "Others"),   # +12
+    # phrased differently. The candidate table confirms the pattern does reach
+    # "isosorbide mononitrate" (n=1) as well as "potassium nitrate" (n=1);
+    # both are ingestion cases here, so it costs nothing in this corpus, but
+    # the breadth is real. Reviewer's call.
+    (r"\bnitrate[s]?\b",           "Others"),   # +12; 11 of 12 are SUICIDE mode
     # --- Cardiac/metabolic drugs. These are the class the wholesale-category
     # exclusion above exists to avoid, so they were reviewed match-by-match:
-    # all 38 occurrences here are ingestion/overdose contexts ("AMLODIPINE
+    # the occurrences here are ingestion/overdose contexts ("AMLODIPINE
     # TOXICITY", "METFORMIN INTOXICATION", "PROBABLE SEQUELAE OF CARVEDILOL AND
     # AMLODIPINE INTOXICATION"), not comorbidity mentions. Flagged for a second
-    # opinion rather than assumed safe.
-    (r"\bamlodipine\b",            "Others"),   # +14
-    (r"\bmetformin\b",             "Others"),   # +12
-    (r"\bmetoprolol\b",            "Others"),   # +8
-    (r"\bdigoxin\b",               "Others"),   # +3
+    # opinion rather than assumed safe -- the case for them rests entirely on
+    # that by-hand read, since no aggregate signal separates them from the
+    # cardiac/metabolic candidates left out (atenolol, diltiazem,
+    # propranolol). Note they skew heavily to intentional self-poisoning
+    # rather than illicit use: of the rows they add, amlodipine is 12/17
+    # SUICIDE mode and metoprolol 11/13, against 19% suicide for Others
+    # overall. If the cohort is ever scoped to illicit/recreational overdose
+    # specifically, this whole group needs revisiting.
+    (r"\bamlodipine\b",            "Others"),   # +17
+    (r"\bmetformin\b",             "Others"),   # +13
+    (r"\bmetoprolol\b",            "Others"),   # +13
+    (r"\bdigoxin\b",               "Others"),   # +4
     (r"\bfelodipine\b",            "Others"),   # +1
-    (r"\bverapamil\b",             "Others"),   # +0 here, retained for coverage
-    (r"\btamsulosin\b",            "Others"),   # +0 here, retained for coverage
+    (r"\bverapamil\b",             "Others"),   # +5
+    (r"\btamsulosin\b",            "Others"),   # +1
 ]
 
 # Generic death-certificate phrases that establish a drug death without naming
