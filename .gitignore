@@ -81,6 +81,9 @@ target/
 
 *.csv
 !NFLIS-Substances_Excel_20260520-222324728.csv
+# Audit trail for the Others allowlist in regex_classifier.py -- small,
+# derived from the NFLIS file above, and referenced from the code comments.
+!reports/nflis_skipped_category_candidates.csv
 # Jupyter Notebook
 .ipynb_checkpoints
 backups_20260729_rerun
