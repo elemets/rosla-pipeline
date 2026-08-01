@@ -84,6 +84,7 @@ target/
 # Audit trail for the Others allowlist in regex_classifier.py -- small,
 # derived from the NFLIS file above, and referenced from the code comments.
 !reports/nflis_skipped_category_candidates.csv
+!reports/others_allowlist_adjudication.csv
 # Jupyter Notebook
 .ipynb_checkpoints
 backups_20260729_rerun
