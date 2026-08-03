@@ -1,0 +1,155 @@
+term,nflis_category,status,n_corpus,rows_added_to_others
+difluoroethane,Other substances,added_this_branch,131,127
+acetaminophen,Analgesics,added_this_branch,123,103
+propranolol,Other substances,added_this_branch,27,9
+metoprolol,Other substances,added_this_branch,25,13
+amlodipine,Other substances,added_this_branch,24,17
+ethylene glycol,Other substances,added_this_branch,24,23
+nortriptyline,Antidepressants,added_this_branch,20,8
+promethazine,Other substances,added_this_branch,20,13
+baclofen,Other substances,added_this_branch,16,6
+metoclopramide,Other substances,added_this_branch,15,2
+loperamide,Other substances,added_this_branch,14,7
+hydroxychloroquine,Other,added_this_branch,14,10
+ibuprofen,Analgesics,added_this_branch,14,10
+metformin,Other substances,added_this_branch,13,13
+pseudoephedrine,Other substances,added_this_branch,13,7
+norchlorcyclizine,Other substances,added_this_branch,12,1
+methocarbamol,Other substances,added_this_branch,11,1
+valproic acid,Other substances,added_this_branch,11,1
+lithium,Other substances,added_this_branch,10,7
+chlorcyclizine,Other substances,added_this_branch,10,1
+buspirone,Other substances,added_this_branch,7,1
+chlorpheniramine,Other substances,added_this_branch,7,4
+diltiazem,Other substances,added_this_branch,7,6
+verapamil,Other substances,added_this_branch,6,5
+dextromethorphan,Other substances,added_this_branch,6,3
+donepezil,Other substances,added_this_branch,6,0
+tizanidine,Other substances,added_this_branch,6,1
+atenolol,Other substances,added_this_branch,5,1
+colchicine,Other substances,added_this_branch,4,4
+digoxin,Other substances,added_this_branch,4,4
+metaxalone,Other substances,added_this_branch,3,1
+felodipine,Other,added_this_branch,1,1
+isosorbide mononitrate,Other substances,added_this_branch,1,1
+paliperidone,Other,added_this_branch,1,1
+potassium nitrate,Other substances,added_this_branch,1,1
+tamsulosin,Other substances,added_this_branch,1,1
+diphenhydramine,Other substances,already_in_others,326,0
+quetiapine,Other substances,already_in_others,191,0
+citalopram,Antidepressants,already_in_others,149,0
+trazodone,Antidepressants,already_in_others,131,0
+fluoxetine,Antidepressants,already_in_others,109,0
+bupropion,Antidepressants,already_in_others,105,0
+olanzapine,Other substances,already_in_others,98,0
+gabapentin,Other substances,already_in_others,90,0
+sertraline,Antidepressants,already_in_others,80,0
+amitriptyline,Antidepressants,already_in_others,66,0
+mirtazapine,Antidepressants,already_in_others,54,0
+doxylamine,Other substances,already_in_others,51,0
+nitrous oxide,Analgesics,already_in_others,37,0
+venlafaxine,Antidepressants,already_in_others,36,0
+duloxetine,Other substances,already_in_others,34,0
+lamotrigine,Other substances,already_in_others,34,0
+paroxetine,Antidepressants,already_in_others,30,0
+clozapine,Other substances,already_in_others,25,0
+topiramate,Other substances,already_in_others,15,0
+clonidine,Other substances,already_in_others,9,0
+aripiprazole,Other substances,already_in_others,8,0
+levetiracetam,Other substances,already_in_others,5,0
+risperidone,Other substances,already_in_others,5,0
+desvenlafaxine,Antidepressants,already_in_others,2,1
+escitalopram,Antidepressants,already_in_others,2,0
+norfluoxetine,Other substances,already_in_others,2,1
+insulin,Other substances,not_included,87,84
+lidocaine,Other substances,not_included,43,37
+levamisole,Other substances,not_included,11,8
+aspirin,Analgesics,not_included,8,6
+fluvoxamine,Antidepressants,not_included,8,3
+warfarin,Other substances,not_included,8,7
+desloratadine,Other substances,not_included,5,2
+benzonatate,Other substances,not_included,4,3
+dipyrone,Analgesics,not_included,4,3
+flecainide,Other,not_included,4,2
+fluoride,Other,not_included,4,4
+lacosamide,Other,not_included,4,1
+memantine,Other,not_included,4,0
+nifedipine,Other substances,not_included,4,0
+phenytoin,Other substances,not_included,4,4
+amyl nitrite,Other substances,not_included,3,3
+atorvastatin,Other substances,not_included,3,2
+carbamazepine,Other substances,not_included,3,3
+hemp,Other substances,not_included,3,3
+heparin,Other,not_included,3,3
+oxcarbazepine,Other,not_included,3,1
+potassium,Other substances,not_included,3,2
+rocuronium,Other substances,not_included,3,2
+sevoflurane,Other substances,not_included,3,3
+vancomycin,Other substances,not_included,3,3
+vilazodone,Antidepressants,not_included,3,0
+amantadine,Other substances,not_included,2,2
+amoxicillin,Other substances,not_included,2,2
+benzoylecgonine,Narcotics,not_included,2,2
+chloroform,Other substances,not_included,2,1
+clomipramine,Other substances,not_included,2,1
+hydrochlorothiazide,Other substances,not_included,2,0
+lurasidone,Other substances,not_included,2,1
+methotrexate,Other substances,not_included,2,2
+naloxone,Narcotics,not_included,2,0
+naproxen,Analgesics,not_included,2,1
+phenibut,Other substances,not_included,2,1
+prednisone,Other substances,not_included,2,2
+valproate,Other substances,not_included,2,0
+ziprasidone,Other,not_included,2,0
+zoloft,Other substances,not_included,2,1
+dapsone,Other substances,not_included,1,1
+10-hydroxycarbazepine,Other substances,not_included,1,0
+acepromazine,Other substances,not_included,1,1
+atomoxetine,Other substances,not_included,1,0
+azithromycin,Other substances,not_included,1,1
+bactrim,Other substances,not_included,1,1
+benazepril,Other substances,not_included,1,1
+betamethasone,Other substances,not_included,1,1
+brompheniramine,Other substances,not_included,1,1
+butyl nitrite,Other substances,not_included,1,1
+carbidopa,Other substances,not_included,1,0
+carvedilol,Other substances,not_included,1,0
+cimetidine,Other substances,not_included,1,0
+clindamycin,Other substances,not_included,1,1
+clopidogrel,Other substances,not_included,1,1
+cyclosporine,Other,not_included,1,1
+cyfluthrin,Other substances,not_included,1,1
+depakote,Other substances,not_included,1,1
+dothiepin,Antidepressants,not_included,1,1
+famotidine,Other substances,not_included,1,0
+guanfacine,Other substances,not_included,1,0
+hydralazine,Other substances,not_included,1,1
+hydrocortisone,Other substances,not_included,1,1
+indomethacin,Other substances,not_included,1,0
+isobutyl nitrite,Other substances,not_included,1,1
+isoflurane,Other,not_included,1,1
+isosorbide,Other substances,not_included,1,0
+labetalol,Other substances,not_included,1,0
+levodopa,Other substances,not_included,1,0
+levofloxacin,Other substances,not_included,1,1
+levothyroxine,Other substances,not_included,1,0
+lisinopril,Other substances,not_included,1,0
+losartan,Other substances,not_included,1,0
+meloxicam,Analgesics,not_included,1,0
+milnacipran,Other substances,not_included,1,0
+ondansetron,Other substances,not_included,1,1
+ornithine,Other substances,not_included,1,1
+oxacillin,Other substances,not_included,1,1
+pheniramine,Other substances,not_included,1,0
+phenol,Other substances,not_included,1,1
+plavix,Other,not_included,1,1
+prazosin,Other,not_included,1,0
+quinine,Other substances,not_included,1,0
+rosuvastatin,Other substances,not_included,1,1
+sulfasalazine,Other,not_included,1,1
+sumatriptan,Other substances,not_included,1,0
+terazosin,Other substances,not_included,1,1
+tetracaine,Other substances,not_included,1,1
+tianeptine,Antidepressants,not_included,1,1
+triiodothyronine,Other substances,not_included,1,1
+vortioxetine,Antidepressants,not_included,1,0
