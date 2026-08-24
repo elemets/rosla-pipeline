@@ -181,6 +181,7 @@ ESSENTIAL_PATTERNS = [
     (r"\bmathamphetamine\b",       "Methamphetamine"),
     (r"\bmetamphetamine\b",        "Methamphetamine"),
     (r"\bmetahmphetamine\b",       "Methamphetamine"),
+    (r"\bmehtamphetamine\b",       "Methamphetamine"),
     (r"\bmetehamphetamine\b",      "Methamphetamine"),
     (r"\bmetethmphetamine\b",      "Methamphetamine"),
     (r"\bdextroamphetamine\b",     "Methamphetamine"),
@@ -426,6 +427,8 @@ ESSENTIAL_PATTERNS = [
     (r"\bdextromethorphan\b",      "Others"),   # +3; see NFLIS_NAME_EXCLUSIONS note
     (r"\bmetoclopramide\b",        "Others"),   # +2
     (r"\batenolol\b",              "Others"),   # +1
+    (r"\blabetalol\b",             "Others"),   # +1
+    (r"\blabatelol\b",             "Others"),   # +1; transposed spelling seen in cause text
     (r"\bbuspirone\b",             "Others"),   # +1
     (r"\bchlorcyclizine\b",        "Others"),   # +1
     (r"\bnorchlorcyclizine\b",     "Others"),   # +1; distinct token, \b blocks the above
@@ -694,20 +697,6 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
         if "Any Drugs" in out.columns
         else np.zeros(len(out), dtype=int)
     )
-    out["Any Drugs"] = (
-        (out["Number_Substances"] > 0).astype(int).values |
-        original_any |
-        any_drug_regex
-    ).astype(int)
-    if verbose:
-        before_any = int(original_any.sum())
-        after_any = int(out["Any Drugs"].sum())
-        sign = "+" if after_any >= before_any else ""
-        print(
-            f"  {'Any Drugs':<25} {before_any:>7,}  "
-            f"{sign}{after_any - before_any:>5,}  {after_any:>7,}"
-        )
-        print(f"  Generic drug-death phrase matches: {n_generic_any:,}")
     original_any_opioids = (
         out["Any Opioids"].fillna(0).astype(int).values
         if "Any Opioids" in out.columns
@@ -718,6 +707,27 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
         original_any_opioids |
         any_opioid_regex
     ).astype(int)
+
+    # Any Drugs is fully derived: a substance column fired, Any Opioids fired,
+    # or a generic drug-death phrase did. Two things to note.
+    #
+    # BERT's own "Any Drugs" head is deliberately NOT OR-ed in. Its tuned
+    # threshold is low enough (0.05 for the shipped checkpoint) that it fires
+    # on records with no drug text at all — blank cause fields, or purely
+    # somatic ones like "ATHEROSCLEROTIC CARDIOVASCULAR DISEASE" — and an OR
+    # can only ever add those, never correct them. The substance columns keep
+    # their OR: those are evidence of a named drug, which is what this column
+    # aggregates.
+    #
+    # Any Opioids must be included or the two disagree. It can be set by a
+    # generic "opioid"/"opiate" mention that names no specific drug, so it does
+    # not always imply Number_Substances > 0 ("PROBABLE OPIOID TOXICITY"), and
+    # without this term such a record ends up Any Opioids=1, Any Drugs=0.
+    out["Any Drugs"] = (
+        (out["Number_Substances"] > 0).astype(int).values |
+        out["Any Opioids"].values |
+        any_drug_regex
+    ).astype(int)
     if verbose:
         before_opioid = int(original_any_opioids.sum())
         after_opioid = int(out["Any Opioids"].sum())
@@ -727,6 +737,14 @@ def apply_corrections(df: pd.DataFrame, patterns: dict, verbose: bool = True) ->
             f"{sign}{after_opioid - before_opioid:>5,}  {after_opioid:>7,}"
         )
         print(f"  Generic 'opioid(s)' mention matches: {n_generic_opioid:,}")
+        before_any = int(original_any.sum())
+        after_any = int(out["Any Drugs"].sum())
+        sign = "+" if after_any >= before_any else ""
+        print(
+            f"  {'Any Drugs':<25} {before_any:>7,}  "
+            f"{sign}{after_any - before_any:>5,}  {after_any:>7,}"
+        )
+        print(f"  Generic drug-death phrase matches: {n_generic_any:,}")
 
     return out
 

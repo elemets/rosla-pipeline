@@ -22,7 +22,12 @@ os.chdir("/home/afunnell/Code/Rapid_overdose_clean/pipeline")
 from GeocodeClass import Geocoder  # noqa: E402
 from pipeline import join_similar_columns_for_file  # noqa: E402
 
-BACKUP = "backups_20260729_rerun/geocoded"
+# Every directory holding *_geocoded.csv from a previous run. Earlier entries
+# win when the same address appears twice, so put the freshest cache first.
+CACHE_DIRS = [
+    "geocode_cache",
+    "backups_20260729_rerun/geocoded",
+]
 CLASSIFIED = "pipeline_steps/input_files/classified"
 GEOCODED = "pipeline_steps/input_files/geocoded"
 
@@ -30,7 +35,9 @@ GEOCODED = "pipeline_steps/input_files/geocoded"
 def build_cache():
     """address string -> (lat, lon, formatted_address) from the previous run."""
     cache = {}
-    for path in sorted(glob.glob(os.path.join(BACKUP, "*_geocoded.csv"))):
+    paths = [p for d in CACHE_DIRS
+             for p in sorted(glob.glob(os.path.join(d, "*_geocoded.csv")))]
+    for path in paths:
         if "combined_classified" in path:
             continue
         cols = ["eventaddress", "address.death", "address", "lat", "lon",
