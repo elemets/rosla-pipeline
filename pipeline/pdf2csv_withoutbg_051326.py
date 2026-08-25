@@ -370,7 +370,8 @@ def parse_page_text(page_lines: List[Line]) -> List[Dict[str, str]]:
 
 # ---------- Case-level merge ----------
 EXPECTED_COLUMNS = [
-    "CaseNum", "FirstName", "LastName", "ResType", "DeathDate", "DeathPlace",
+    "CaseNum", "FirstName", "LastName", "BirthDate", "ResType", "DeathDate",
+    "DeathPlace",
     "DeathAddress", "DeathCity", "DeathZip", "EventPlace", "EventAddress",
     "EventCity", "EventZip", "InjuryDesc", "Mode", "DeathCauseA", "DeathCauseB",
     "DeathCauseC", "DeathCauseD", "OtherCause", "Races", "Gender", "Age",
@@ -537,7 +538,8 @@ def parse_pdf_to_dataframe(
     )
 
     final_cols = [
-        "CaseNum", "FirstName", "LastName", "ResType", "DeathDate", "DeathPlace",
+        "CaseNum", "FirstName", "LastName", "BirthDate", "ResType", "DeathDate",
+        "DeathPlace",
         "DeathAddress", "DeathCity", "DeathZip", "EventPlace", "EventAddress",
         "EventCity", "EventZip", "InjuryDesc", "Mode", "CauseA", "CauseB",
         "CauseC", "CauseD", "OtherCause", "Races", "Gender", "Age", "SourcePages",

@@ -994,6 +994,7 @@ def clean_final_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "CaseNum",
         "FirstName",
         "LastName",
+        "BirthDate",
         "ResType",
         "DeathDate",
         "DeathPlace",

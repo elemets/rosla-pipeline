@@ -9,11 +9,17 @@ from transformers import (
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import argparse
+from pathlib import Path
 
 try:
     from .regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns, clean_bert_text
 except ImportError:
     from regex_classifier import DEFAULT_NFLIS, apply_corrections, build_patterns, clean_bert_text
+
+# Model checkpoints live under <repo root>/models/. Resolving from the file
+# location rather than the CWD lets classification run from anywhere, not just
+# from inside pipeline/.
+MODELS_ROOT = Path(__file__).resolve().parent.parent / "models"
 
 drug_cols = [
     "Methamphetamine",
@@ -49,6 +55,14 @@ class TextDataset(Dataset):
         )
 
 
+def resolve_model_dir(model_name) -> Path:
+    """Return the checkpoint directory for a model name or explicit path."""
+    path = Path(model_name)
+    if path.exists():
+        return path
+    return MODELS_ROOT / model_name
+
+
 def load_thresholds(model_name):
     """Load the per-label decision thresholds saved alongside a checkpoint.
 
@@ -56,13 +70,16 @@ def load_thresholds(model_name):
     time) rather than a flat 0.5, since rare classes need a much lower
     cutoff to be recalled at all.
     """
-    thresholds_path = f"../models/{model_name}/best_thresholds.json"
+    thresholds_path = resolve_model_dir(model_name) / "best_thresholds.json"
+    if not thresholds_path.exists():
+        print(f"No best_thresholds.json in {thresholds_path.parent}; using 0.5 for every label.")
+        return torch.full((len(drug_cols),), 0.5, dtype=torch.float32)
     with open(thresholds_path, "r") as f:
         best_thresholds = json.load(f)
     return torch.tensor([best_thresholds[col] for col in drug_cols], dtype=torch.float32)
 
 
-def predict(pred_df, model_name, batch_size=16):
+def predict(pred_df, model_name, batch_size=16, multi_gpu=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     n_gpus = torch.cuda.device_count()
 
@@ -73,7 +90,8 @@ def predict(pred_df, model_name, batch_size=16):
     thresholds = load_thresholds(model_name)
 
     # Load the correct tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(f"../models/{model_name}/")
+    model_dir = resolve_model_dir(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
 
     # Create Dataset and DataLoader for batch processing
     dataset = TextDataset(texts, tokenizer)
@@ -85,12 +103,14 @@ def predict(pred_df, model_name, batch_size=16):
 
     # Load the model and wrap it for multi-GPU
     model = AutoModelForSequenceClassification.from_pretrained(
-        f"../models/{model_name}",
+        str(model_dir),
         num_labels=10,
         problem_type="multi_label_classification",
     )
 
-    if n_gpus > 1:
+    # DataParallel only when asked for: it needs the visible GPUs to talk to
+    # each other, and stalls indefinitely on hosts where they cannot.
+    if multi_gpu and n_gpus > 1:
         model = torch.nn.DataParallel(model)
 
     model.to(device)
