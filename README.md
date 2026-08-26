@@ -16,11 +16,19 @@ the repository root. It runs the BERT model and the NFLIS regex layer and
 returns one row per record with the drug label columns.
 
 Setup — install the requirements and put a trained checkpoint in
-`models/bert_models/<name>/` (the checkpoints are not distributed in this
-repository):
+`models/bert_models/<name>/`:
 
 ```bash
 make install          # or: pip install -r requirements.txt
+```
+
+The trained model is hosted on Hugging Face at
+[Elemets/DrugDetectionBERT](https://huggingface.co/Elemets/DrugDetectionBERT).
+Download it into the location the code expects:
+
+```bash
+pip install -U "huggingface_hub[cli]"
+hf download Elemets/DrugDetectionBERT --local-dir models/bert_models/bioclinicalbert
 ```
 
 Classify a single string, or a `.csv`/`.xlsx` file:
@@ -49,6 +57,24 @@ classify("records.csv", output="classified.csv")
 The checkpoint defaults to `models/bert_models/bioclinicalbert`; override it with
 `MODEL=` (make), `--model` (CLI), `model=` (Python), or the `ROC_MODEL`
 environment variable. Add `--skip-regex` / `use_regex=False` for BERT alone.
+
+## Model
+
+| | |
+| --- | --- |
+| Hugging Face | https://huggingface.co/Elemets/DrugDetectionBERT |
+| Base model | `emilyalsentzer/Bio_ClinicalBERT` |
+| Task | Multi-label classification, 10 drug labels |
+
+Outputs are sigmoid scores. Use the per-label cut-offs in `best_thresholds.json`
+that ship with the checkpoint rather than a flat 0.5.
+
+```python
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+tok = AutoTokenizer.from_pretrained("Elemets/DrugDetectionBERT")
+model = AutoModelForSequenceClassification.from_pretrained("Elemets/DrugDetectionBERT")
+```
 
 Full details of the BERT model training and validation process are described in
 the Journal of Forensic Sciences paper:
